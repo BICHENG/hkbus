@@ -33,6 +33,7 @@
 
   /* 点阵：一个字符 5×7 个点，字模表只写一次，所有格都复用 */
   .word{display:inline-flex;gap:var(--cg,4px);vertical-align:middle}
+  .word.sn{--d:1.5px;--cg:0.7px}
   .word.s0{--d:2px;--cg:1px}
   .word.s1{--d:3px;--cg:2px}
   .word.s2{--d:5px;--cg:4px}
@@ -168,6 +169,45 @@
     border-radius:6px;padding:5px 12px;font:inherit;font-size:11px;letter-spacing:.1em;cursor:pointer}
   .foot button + button{margin-left:8px}
   .foot button:hover{background:#312718}
+
+  /* ── 窄屏（手機） ───────────────────────────────────── */
+  @media (max-width: 560px){
+    .wrap{padding:8px 5px 20px}
+    .frame{border-radius:10px}
+    .head{flex-wrap:wrap;gap:8px;padding:11px 13px}
+    .badge{order:1;padding:6px 9px;gap:7px}
+    .clock{order:2;margin-left:auto}
+    .title{order:3;flex:1 0 100%}
+    .title h1{font-size:16px;line-height:1.45;word-break:keep-all}
+    .title .en{gap:4px;margin-top:6px}
+    .leg-head{padding:12px 13px 0;gap:7px}
+    .leg-head b{font-size:15px}
+    .leg-head em{margin-left:0;flex:1 0 100%;order:6}
+    .leg-head .note{flex:1 0 100%;order:7}
+    .pick{padding:10px 13px 0;gap:7px}
+    .pick label{flex:1 1 100%;justify-content:space-between}
+    .pick select{flex:1;max-width:none;min-width:0}
+    .pick button{flex:0 0 auto}
+    .hint{padding:8px 13px 0}
+    table{width:calc(100% - 26px);margin:12px 13px 0}
+    td{padding:8px 0}
+    .cap{margin:16px 13px 2px;flex-wrap:wrap;gap:6px}
+    .cap em{margin-left:0;flex:1 0 100%}
+    .track{margin:20px 13px 0}
+    .near{margin:8px 13px 0;max-height:200px}
+    .near li{flex-wrap:wrap;gap:3px 8px}
+    .near .zh{max-width:none}
+    .near .id{margin-left:auto}
+    .near .en{margin-left:0;flex:1 0 100%}
+    .transit{margin:8px 13px 0;max-height:none}
+    .bus .row{flex-wrap:wrap;gap:2px 9px}
+    .bus .eta{margin-left:auto}
+    .brace{margin-left:8px;padding-left:8px}
+    details{margin:12px 13px 0}
+    .stops{columns:1;max-height:260px}
+    .foot{flex-wrap:wrap;gap:7px;padding:10px 13px;font-size:10px}
+    .foot button{margin-left:0}
+  }
 </style>
 </head>
 <body>
@@ -251,6 +291,16 @@ const FONT = {
 const GLYPH = {};
 for (const ch in FONT) GLYPH[ch] = FONT[ch].split('.');
 const dotText = s => String(s).toUpperCase().replace(/[^A-Z0-9 ,.:\-/<>()+#?]/g, '');
+
+/* 窄屏用更小的點陣，否則一行放不下 */
+const narrow = () => window.innerWidth < 560;
+const SC = {
+  route: () => narrow() ? 's2' : 's3',
+  clock: () => narrow() ? 's1' : 's2',
+  eta:   () => narrow() ? 's1' : 's2',
+  min:   () => narrow() ? 's2' : 's3',
+  en:    () => narrow() ? 'sn' : 's0'
+};
 
 /* ── 两个收藏：去程 / 返程，各自选线路与站 ────────────── */
 const PICK_KEY = 'citybus.bus.pick.v2';
@@ -735,7 +785,7 @@ function paintNear(panel, leg){
     en.className = 'en';
     li.append(zh, id, en);
     panel.near.append(li);
-    wordInto(en, stopEn(a.stop), 's0', false);
+    wordInto(en, stopEn(a.stop), SC.en(), false);
   }
 }
 
@@ -789,15 +839,15 @@ function renderPanel(panel, live){
       + ` · 現時班距 <b>${f ? f : '—'}</b> 分` + (last != null ? ` · 末班尚有 <b>${last}</b> 分` : '')
     : '';
 
-  // 本站接下来几班（顯示同一分鐘的只留一個）
+  // 本站接下来几班：只取還在窗口內的、身份（到達次序）不重複的班次
   const raw = (CB.cache.slots[`${leg.plan.route}|${leg.dir}|${leg.board.stop}`] || [])
-    .filter(s => s.etaMs > Date.now() - 60000);
+    .filter(s => !s.stale && s.etaMs > Date.now() - 60000);
   const list = [];
-  const seenMin = new Set();
+  const seenSeq = new Set();
   for (const s of raw){
-    const k = HK_MIN.format(new Date(s.etaMs));
-    if (seenMin.has(k)) continue;
-    seenMin.add(k);
+    const k = s.etaSeq != null ? 'seq' + s.etaSeq : 'ms' + s.etaMs;
+    if (seenSeq.has(k)) continue;
+    seenSeq.add(k);
     list.push(s);
     if (list.length >= 4) break;
   }
@@ -835,11 +885,11 @@ function renderPanel(panel, live){
   }
   for (const s of list){
     if (!s._tw) continue;
-    wordInto(s._tw, HK_MIN.format(new Date(s.etaMs)), 's2');
+    wordInto(s._tw, HK_MIN.format(new Date(s.etaMs)), SC.eta());
     s._zh.textContent = s.dest || '';
     wordInto(s._en, s.destEn || '', 's1');
     const left = (s.etaMs - Date.now())/60000;
-    flapValue(s._mw, left <= 0 ? '即將' : (left < 1 ? '<1' : String(Math.round(left))), 's3');
+    flapValue(s._mw, left <= 0 ? '即將' : (left < 1 ? '<1' : String(Math.round(left))), SC.min());
   }
 
   paintTrack(panel, live, leg);
@@ -850,7 +900,7 @@ function renderPanel(panel, live){
 
 function renderHead(){
   const p = panels.go.preset, q = panels.back.preset;
-  wordInto(routeEl, p.route, 's3');
+  wordInto(routeEl, p.route, SC.route());
   ttlEl.textContent = stopZh(p.from) + ' → ' + stopZh(p.to);
   ttlEl.title = '去程 ' + stopZh(p.from) + ' → ' + stopZh(p.to)
     + '　·　返程 ' + stopZh(q.from) + ' → ' + stopZh(q.to);
@@ -862,7 +912,7 @@ function renderHead(){
       seen.add(id);
       const line = document.createElement('div');
       ttlenEl.append(line);
-      wordInto(line, stopEn(id), 's0', false);
+      wordInto(line, stopEn(id), SC.en(), false);
     }
   }
   document.title = '城巴 ' + p.route + ' · 實時班次';
@@ -879,7 +929,7 @@ function render(){
     : '尚未取得資料';
 }
 function renderClock(){
-  wordInto(clockEl, HK_SEC.format(new Date()), 's2', false);
+  wordInto(clockEl, HK_SEC.format(new Date()), SC.clock(), false);
 }
 
 /* ── 启动 ───────────────────────────────────────────── */
@@ -908,6 +958,13 @@ async function boot(){
 }
 
 document.getElementById('refresh').onclick = async () => { await CB.pull(); render(); };
+let wasNarrow = narrow();
+window.addEventListener('resize', () => {
+  const n = narrow();
+  if (n === wasNarrow) return;
+  wasNarrow = n;
+  render();                       // 換了點陣大小要重畫
+});
 document.getElementById('export').onclick = () => {
   const snap = {
     at: new Date().toISOString(),

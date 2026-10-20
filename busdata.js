@@ -156,46 +156,52 @@
   }
 
   /* ── 槽位：每站按到站时间排好的一列车 ───────────────── */
+  /* 槽位：一班车在一个站的状态。
+     班次的身份是接口给的到达次序 eta_seq（该站该方向的第几班），
+     不是到站时间——到站时间是会移动的预测。
+     早先拿「到站时间接近」当同一班车，预测一漂移就会把同一班车拆成两条记录，
+     同一个分钟在看板上出现两次。 */
   function mergeSlots(key, buses, now) {
     const stop = key.split('|')[2];
     const prev = (cache.slots[key] || []).filter(s => now - s.seenAt < SLOT_TTL);
-    const used = new Set();
+    const fresh = prev.filter(s => !s.stale);
     const next = [];
-    const seenEta = new Set();
+    const used = new Set();
+
     for (const b of buses) {
-      // 同一班车在同一站可能出现两次（接口会重複給同一個到站時間），只留一個
-      if (seenEta.has(b.etaMs)) continue;
-      seenEta.add(b.etaMs);
-      let best = -1, bestD = Infinity;
-      prev.forEach((s, i) => {
-        if (used.has(i)) return;
-        const d = Math.abs(s.etaMs - b.etaMs);
-        if (d < bestD) { bestD = d; best = i; }
-      });
-      if (best >= 0 && bestD < MATCH_TOL) {
-        used.add(best);
-        next.push(Object.assign({}, prev[best], {
-          eta: b.eta, etaMs: b.etaMs, dest: b.dest, rmk: b.rmk, etaSeq: b.etaSeq,
-          seenAt: now, stale: false, stop
-        }));
-      } else {
-        next.push({eta: b.eta, etaMs: b.etaMs, dest: b.dest, rmk: b.rmk, etaSeq: b.etaSeq,
-                   seenAt: now, bornAt: now, stale: false, stop});
+      let hit = -1;
+      if (b.etaSeq != null) {
+        for (let i = 0; i < fresh.length; i++){
+          if (used.has(i) || fresh[i].etaSeq !== b.etaSeq) continue;
+          hit = i; break;
+        }
       }
+      if (hit < 0) {
+        // 沒有次序可對（接口沒給 eta_seq）才退回按時間配對
+        let bestD = Infinity;
+        for (let i = 0; i < fresh.length; i++){
+          if (used.has(i)) continue;
+          const d = Math.abs(fresh[i].etaMs - b.etaMs);
+          if (d < bestD) { bestD = d; hit = i; }
+        }
+        if (bestD >= MATCH_TOL) hit = -1;
+      }
+      let base = null;
+      if (hit >= 0) { used.add(hit); base = fresh[hit]; }
+      next.push(Object.assign({}, base || {}, {
+        eta: b.eta, etaMs: b.etaMs, dest: b.dest, destEn: b.destEn, rmk: b.rmk,
+        etaSeq: b.etaSeq, seenAt: now, stale: false, stop
+      }));
     }
-    prev.forEach((s, i) => { if (!used.has(i)) next.push(Object.assign({}, s, {stale: true})); });
+    // 這一輪沒再出現的班次留作記憶（跨站配車時車可能已開過上游站），
+    // 但不算數，看板與配對都不用它。
+    fresh.forEach((s, i) => {
+      if (!used.has(i)) next.push(Object.assign({}, s, {stale: true}));
+    });
     next.sort((a, b) => a.etaMs - b.etaMs);
-    // 舊記錄裡也可能有同一個到站時間，只留最新的一個
-    const uniq = [];
-    const seen = new Set();
-    for (const s of next) {
-      if (seen.has(s.etaMs)) continue;
-      seen.add(s.etaMs);
-      uniq.push(s);
-    }
-    cache.slots[key] = uniq;
+    cache.slots[key] = next;
     cacheDirty = true;
-    return uniq;
+    return next;
   }
 
   /* 相邻两站之间怎么把班次对上。
