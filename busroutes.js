@@ -122,9 +122,23 @@
     }
   };
 
-  /* 逐段里程（米）：由 CSDI GML 路网几何按站切分后填入。
-     seg[i] 是第 i 站到第 i+1 站之间的实际公路长度。 */
-  const segments = {};   // 'B3A|O' -> [m0, m1, ...]
+  /* 逐段里程（米）：seg[i] 是第 i 站到第 i+1 站之间的实际公路长度。
+     来源：OSM 路网（经 OSRM 路由按站序取得，逐段切分），2026-10-21 生成。
+     与运输署 CSDI 的整线 Shape_Leng 有出入（去程方向 OSM 长 15~20%，
+     回程方向几乎一致），所以这里标成 'osm'，页面要照实说「OSM 路網里程」。 */
+  const segments = {
+    'B3A|O': [487, 320, 352, 538, 515, 463, 279, 643, 324, 424, 450, 411, 1119, 16730],
+    'B3A|I': [12799, 1088, 315, 745, 238, 482, 568, 490, 248, 448, 570, 392, 568],
+    'B3X|O': [846, 405, 17566],
+    'B3X|I': [14139, 1563, 656],
+    'B3|O':  [778, 344, 477, 384, 1525, 169, 361, 359, 158, 277, 510, 656, 18817],
+    'B3|I':  [14139, 1306, 545, 288, 177, 298, 594, 366, 898, 621, 171, 565, 459, 283, 164, 397]
+  };
+  /* 逐段里程的来源标签：'osm' = OSM 路网，'official' = 运输署官方 */
+  const segSource = {
+    'B3A|O': 'osm', 'B3A|I': 'osm', 'B3X|O': 'osm', 'B3X|I': 'osm',
+    'B3|O': 'osm',  'B3|I': 'osm'
+  };
 
   /* 每条线的默认上车组合：起點 ⇄ 終點，两个方向都自动成立。
      站号取自 rt.data.gov.hk 的 route-stop。 */
@@ -179,5 +193,5 @@
     return Math.round((t - d) / 60000);
   }
 
-  global.BUSROUTES = {routes, segments, defaults, segMs, dayType, freqNow, lastBusIn};
+  global.BUSROUTES = {routes, segments, segSource, defaults, segMs, dayType, freqNow, lastBusIn};
 })(window);

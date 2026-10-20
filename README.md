@@ -7,7 +7,7 @@
 舊的 `/b3a-bus` 地址不會跳轉，已失效。
 
 - [2D 點陣班次屏](bus.html) — 選路線與上車站，看下一班、在途車輛、沿線進度
-- 3D GIS 版（`citybus_gis.html`）— 開發中，載入香港真傾斜攝影與線路
+- [3D GIS 版](citybus_gis.html) — Cesium 1.133 + 地政總署 3DVM 真傾斜攝影 + KMD 影像，線路貼公路走，車輛沿線推算
 
 ## 頁面能做甚麼
 
@@ -25,7 +25,10 @@
 | 到站時間、站序、站名座標 | [rt.data.gov.hk](https://rt.data.gov.hk/v2/transport/citybus) 城巴 API（CORS 開放） |
 | 班距、首末班、道路走向 | 運輸署交通通告（`TA_CTB B3 Series_20250501_C.pdf`、`TA_B3A_Chi.pdf`） |
 | 路線總長 | 運輸署 CSDI「巴士路線」數據集 `FB_ROUTE_LINE` 的 `Shape_Leng` |
+| 逐段折線與逐段里程 | OSM 路網，經 [OSRM](https://router.project-osrm.org/) 按站序取得後逐段切分（`geometry.js`） |
 | 逐段耗時 | 站到站 ETA 配對後的實測中位數（頁面自己也會持續修正） |
+| 3D 傾斜攝影 | 地政總署 3D 視覺化地圖（3DVM, mesh model） |
+| 影像底圖 | KMD World Imagery |
 
 ## 幾件要講清楚的事
 
@@ -41,8 +44,10 @@
 
 ```
 bus.html        2D 點陣屏（本頁主體）
-busdata.js      共用資料層：快取、跨站配車、位置推算（2D／3D 共用）
-busroutes.js    靜態元資料：官方路線長度、班距首末班、逐段基線
+busdata.js      共用資料層：快取、班次身份、跨站配車、位置推算（2D／3D 共用）
+busroutes.js    靜態元資料：官方路線長度、班距首末班、逐段基線、逐段里程
+geometry.js     逐段公路折線與逐段里程（自動生成，勿手改）
+citybus_gis.html 3D GIS 版
 ```
 
 ## 授權

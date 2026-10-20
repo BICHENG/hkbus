@@ -592,7 +592,8 @@ function paintTrack(panel, live, leg){
   const timeSrc = plan.observed === plan.segCount ? '逐段實測'
     : (plan.derived ? `${plan.derived} 段用推算速度`
     : `${plan.staticSeg} 段用靜態基線`);
-  const distSrc = plan.straight ? '里程部分用站間直線距離' : '里程用官方路網';
+  const distSrc = plan.straight ? '里程部分用站間直線距離'
+    : (plan.distKind === 'osm' ? '里程用 OSM 路網' : '里程用官方路網');
   panel.capM.textContent =
       `本段 ${Math.round(plan.rideMs/60000)} 分 · ${(plan.rideDist/1000).toFixed(1)} km`
     + `（${timeSrc} · ${distSrc}）`;

@@ -345,6 +345,7 @@
     const key = `${route}|${dir}`;
     const sm = cache.seg[key] || [];
     const off = (global.BUSROUTES && global.BUSROUTES.segments && global.BUSROUTES.segments[key]) || null;
+    const src = (global.BUSROUTES && global.BUSROUTES.segSource && global.BUSROUTES.segSource[key]) || null;
     const meta = (global.BUSROUTES && global.BUSROUTES.routes[key]) || null;
     const stat = (global.BUSROUTES && global.BUSROUTES.segMs && global.BUSROUTES.segMs[key]) || null;
 
@@ -359,7 +360,7 @@
         i, fromStop: seq[i].stop, toStop: seq[i+1].stop,
         ms: s ? s.ms : staticMs, samples: s ? s.n : 0, staticMs,
         straight, distM: official != null ? official : straight,
-        distKind: official != null ? 'official' : 'straight'
+        distKind: official != null ? (src || 'official') : 'straight'
       });
     }
     // 还没有实测也没有静态基线的段：按全线平均速度推算
@@ -469,7 +470,7 @@
     const aLo = at(lo), aHi = at(hi);
     const rideMs = aLo && aHi ? aHi.tMs - aLo.tMs : 0;
     const rideDist = aLo && aHi ? aHi.dM - aLo.dM : 0;
-    let observed = 0, staticSeg = 0, derived = 0, straight = 0;
+    let observed = 0, staticSeg = 0, derived = 0, straight = 0, distKind = null;
     for (let i = lo; i < hi; i++){
       const sg = segs[i];
       if (!sg) continue;
@@ -477,10 +478,11 @@
       else if (sg.src === 'static') staticSeg++;
       else derived++;
       if (sg.distKind === 'straight') straight++;
+      else if (!distKind) distKind = sg.distKind;
     }
     return {route, dir, lo, hi, wlo, whi, axis, seq, segs,
             totalMs: t, totalDist: d, rideMs, rideDist, segCount: hi - lo,
-            observed, staticSeg, derived, straight,
+            observed, staticSeg, derived, straight, distKind,
             roadLen: segs[0] ? segs[0].roadLen : null};
   }
 
