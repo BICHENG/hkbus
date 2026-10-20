@@ -539,9 +539,13 @@ function axisPos(a){ return state.axis === 'dist' ? a.distPos : a.timePos; }
 function paintTrack(panel, live, leg){
   const plan = leg.plan;
   const track = panel.track;
+  const timeSrc = plan.observed === plan.segCount ? '逐段實測'
+    : (plan.derived ? `${plan.derived} 段用推算速度`
+    : `${plan.staticSeg} 段用靜態基線`);
+  const distSrc = plan.straight ? '里程部分用站間直線距離' : '里程用官方路網';
   panel.capM.textContent =
       `本段 ${Math.round(plan.rideMs/60000)} 分 · ${(plan.rideDist/1000).toFixed(1)} km`
-    + (plan.observed < plan.segCount ? `（${plan.segCount - plan.observed} 段用推算速度）` : '（逐段實測）');
+    + `（${timeSrc} · ${distSrc}）`;
 
   const key = plan.axis.map(a => a.stop).join(',');
   if (panel.stSig !== key){
@@ -785,10 +789,18 @@ function renderPanel(panel, live){
       + ` · 現時班距 <b>${f ? f : '—'}</b> 分` + (last != null ? ` · 末班尚有 <b>${last}</b> 分` : '')
     : '';
 
-  // 本站接下来几班
-  const list = (CB.cache.slots[`${leg.plan.route}|${leg.dir}|${leg.board.stop}`] || [])
-    .filter(s => s.etaMs > Date.now() - 60000)
-    .slice(0, 4);
+  // 本站接下来几班（同一分鐘的只留一個）
+  const raw = (CB.cache.slots[`${leg.plan.route}|${leg.dir}|${leg.board.stop}`] || [])
+    .filter(s => s.etaMs > Date.now() - 60000);
+  const list = [];
+  const seenMin = new Set();
+  for (const s of raw){
+    const k = Math.floor(s.etaMs / 60000);
+    if (seenMin.has(k)) continue;
+    seenMin.add(k);
+    list.push(s);
+    if (list.length >= 4) break;
+  }
   const sig = list.map(s => s.etaMs + s.dest).join('|');
   if (panel.sig !== sig){
     panel.sig = sig;

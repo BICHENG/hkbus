@@ -161,7 +161,11 @@
     const prev = (cache.slots[key] || []).filter(s => now - s.seenAt < SLOT_TTL);
     const used = new Set();
     const next = [];
+    const seenEta = new Set();
     for (const b of buses) {
+      // 同一班车在同一站可能出现两次（接口会重複給同一個到站時間），只留一個
+      if (seenEta.has(b.etaMs)) continue;
+      seenEta.add(b.etaMs);
       let best = -1, bestD = Infinity;
       prev.forEach((s, i) => {
         if (used.has(i)) return;
@@ -181,9 +185,17 @@
     }
     prev.forEach((s, i) => { if (!used.has(i)) next.push(Object.assign({}, s, {stale: true})); });
     next.sort((a, b) => a.etaMs - b.etaMs);
-    cache.slots[key] = next;
+    // 舊記錄裡也可能有同一個到站時間，只留最新的一個
+    const uniq = [];
+    const seen = new Set();
+    for (const s of next) {
+      if (seen.has(s.etaMs)) continue;
+      seen.add(s.etaMs);
+      uniq.push(s);
+    }
+    cache.slots[key] = uniq;
     cacheDirty = true;
-    return next;
+    return uniq;
   }
 
   /* 相邻两站之间怎么把班次对上。
@@ -451,10 +463,18 @@
     const aLo = at(lo), aHi = at(hi);
     const rideMs = aLo && aHi ? aHi.tMs - aLo.tMs : 0;
     const rideDist = aLo && aHi ? aHi.dM - aLo.dM : 0;
-    let observed = 0, segCount = hi - lo;
-    for (let i = lo; i < hi; i++) if (segs[i] && segs[i].src === 'observed') observed++;
+    let observed = 0, staticSeg = 0, derived = 0, straight = 0;
+    for (let i = lo; i < hi; i++){
+      const sg = segs[i];
+      if (!sg) continue;
+      if (sg.src === 'observed') observed++;
+      else if (sg.src === 'static') staticSeg++;
+      else derived++;
+      if (sg.distKind === 'straight') straight++;
+    }
     return {route, dir, lo, hi, wlo, whi, axis, seq, segs,
-            totalMs: t, totalDist: d, rideMs, rideDist, segCount, observed,
+            totalMs: t, totalDist: d, rideMs, rideDist, segCount: hi - lo,
+            observed, staticSeg, derived, straight,
             roadLen: segs[0] ? segs[0].roadLen : null};
   }
 
