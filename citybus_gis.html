@@ -448,6 +448,9 @@
     g.fillStyle = col;
     roundRect(g, 6, 10, 84, 24, 6); g.fill();
     g.shadowBlur = 0;
+    /* 深色外框：亮底圖與暗底圖上都看得見車身 */
+    g.lineWidth = 3; g.strokeStyle = 'rgba(6,8,12,.95)';
+    roundRect(g, 6, 10, 84, 24, 6); g.stroke();
     g.fillStyle = 'rgba(8,10,14,.85)';
     roundRect(g, 13, 14, 60, 9, 3); g.fill();
     g.fillStyle = '#fff4d2';
@@ -501,7 +504,7 @@
      所以給固定海拔並關閉深度測試，讓車永遠看得見。 */
   let followId = null;          // 正在跟隨的班次
   let animOn = true;            // 動效開關：到站脉冲與跟隨
-  const BASE_SCALE = 0.55;
+  const BASE_SCALE = 0.95;
   function moveBuses(now) {
     for (const st of busMarks.values()) {
       if (!st.bb.show) continue;
@@ -989,7 +992,9 @@
   /* 給驗收腳本（headless Chrome CDP）用：它要能查圖層狀態 */
   window.__gis = { viewer: viewer, scene: scene, get prims() { return routePrims; },
                    get arrows() { return arrowBillboards; }, get stops() { return stopPoints; },
-                   get labels() { return stopLabels; }, status: status, GEO: window.GEO,
+                   get labels() { return stopLabels; }, get buses() { return busBillboards; },
+                   get origin() { return { lat: ORIGIN_LAT, lon: ORIGIN_LON }; },
+                   status: status, GEO: window.GEO,
                    get paths() { return CB.paths; } };
 
   boot();

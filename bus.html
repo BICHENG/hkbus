@@ -747,7 +747,7 @@ function paintTransit(panel, live, leg){
     path.textContent = r.from + ' → ' + r.to;
     const seg = document.createElement('u');
     seg.textContent = ' 本段 ' + Math.round(r.segMs/60000) + ' 分 ' + r.segKm.toFixed(1) + 'km'
-      + (r.passed ? '' : ' · 還有 ' + r.nextMin + ' 分到');
+      + (r.passed ? '' : ' · 還有 ' + r.nextMin + ' 分到 ' + r.to);
     path.append(seg);
     const eta = document.createElement('span');
     eta.className = 'eta' + (r.left == null ? ' off' : '');
