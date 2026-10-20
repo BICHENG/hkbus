@@ -152,6 +152,14 @@
   const BUS_HEIGHT = 25;                          /* 車輛海拔（米） */
   const HUD_MS = 1000;
 
+  /* 輕量模式：手機上傾斜攝影會把頁面拖垮，自動降級——
+     不載 3D 瓦片、渲染倍率降到 1（手機 DPR 常常是 3，差三倍像素量）。
+     ?lite=1 強制開、?full=1 強制關。 */
+  const smallScreen = window.matchMedia && window.matchMedia('(max-width: 680px)').matches;
+  const LITE = /(^|[?&])lite=1/.test(location.search)
+    ? true
+    : (/(^|[?&])full=1/.test(location.search) ? false : !!smallScreen);
+
   CB.setScope(ROUTES);
 
   /* CB.proj 是以 bbox 中心為原點的等距圓柱投影：x 向東、z 向北。
@@ -173,6 +181,8 @@
     infoBox: false, selectionIndicator: false, shouldAnimate: false
   });
   const scene = viewer.scene;
+  /* 輕量模式渲染倍率降到 1：手機 DPR 常常是 3，像素量差三倍 */
+  try { viewer.resolutionScale = LITE ? 1 : Math.min(window.devicePixelRatio || 1, 2); } catch (e) {}
   scene.globe.baseColor = Cesium.Color.fromCssColorString('#05070a');
   scene.backgroundColor = Cesium.Color.fromCssColorString('#05070a');
   scene.skyAtmosphere.show = false;
@@ -231,6 +241,12 @@
     const warnEl = document.getElementById('hintWarn');
     warnEl.hidden = false;
     warnEl.textContent = '這個環境連同源 worker 都建不起來：傾斜攝影只會有幾何、沒有紋理。';
+  } else if (LITE) {
+    const warnEl = document.getElementById('hintWarn');
+    warnEl.hidden = false;
+    warnEl.style.color = '#8a7a4a';
+    warnEl.textContent = '輕量模式：已跳過傾斜攝影、降低渲染倍率。手機用 2D 班次屏更快 → bus.html；' +
+      '要看完整 3D，請在桌面瀏覽器開（加 ?full=1 強制）。';
   }
 
   /* ── DOM ─────────────────────────────────────────────── */
@@ -549,10 +565,16 @@
 
   let tileset = null;
   async function loadTileset() {
-    /* ?notiles=1：跳过傾斜攝影。弱網或只關心線路與車位時用得上。 */
+    /* ?notiles=1：跳過傾斜攝影。弱網或只關心線路與車位時用得上。 */
     if (/(^|[?&])notiles=1/.test(location.search)) {
       status.tiles = 'wait';
       status.tilesText = '已跳過（?notiles=1）';
+      renderHud();
+      return;
+    }
+    if (LITE) {
+      status.tiles = 'wait';
+      status.tilesText = '輕量模式已跳過';
       renderHud();
       return;
     }
