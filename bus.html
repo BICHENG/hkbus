@@ -28,6 +28,8 @@
   .badge em{font-style:normal;font-size:12px;letter-spacing:.14em;color:#8a5f04}
   .title{flex:1;min-width:0}
   .title h1{margin:0;font-size:19px;letter-spacing:.04em;color:var(--text);font-weight:600;line-height:1.35}
+  .title h1 .seg{white-space:nowrap}          /* 站名不拆開，只在箭頭處斷行 */
+  .title h1 .arrow{color:var(--amber-dim);padding:0 3px}
   .title .en{margin-top:8px;display:flex;flex-direction:column;gap:5px;align-items:flex-start}
   .clock{flex:none}
 
@@ -115,12 +117,12 @@
     scrollbar-width:thin;scrollbar-color:#3a2f1c transparent}
   .near::-webkit-scrollbar{width:6px}
   .near::-webkit-scrollbar-thumb{background:#3a2f1c;border-radius:3px}
-  .near li{display:flex;align-items:center;gap:10px;padding:3px 0;border-bottom:1px solid #191510}
+  .near li{display:flex;align-items:center;gap:4px 10px;padding:5px 0;border-bottom:1px solid #191510;flex-wrap:wrap}
   .near li:last-child{border-bottom:0}
   .near .zh{color:#c9bfa8;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
     max-width:230px;flex:none}
   .near .id{color:#6b5a35;font-size:10px;letter-spacing:.04em;white-space:nowrap}
-  .near .en{margin-left:auto;opacity:.8}
+  .near .en{margin-left:auto;opacity:.8;flex:1 0 100%}
   .near li.me .zh{color:var(--amber)}
   .near li.me .id{color:#8a6a2a}
 
@@ -201,8 +203,7 @@
     .near li{flex-wrap:wrap;gap:3px 8px}
     .near .zh{max-width:none}
     .near .id{margin-left:auto}
-    .near .en{margin-left:0;flex:1 0 100%}
-    .transit{margin:8px 13px 0;max-height:none}
+    .near .en{margin-left:0;flex:1 0 100%}    .transit{margin:8px 13px 0;max-height:none}
     .bus .row{flex-wrap:wrap;gap:2px 9px}
     .bus .eta{margin-left:auto}
     .brace{margin-left:8px;padding-left:8px}
@@ -916,7 +917,11 @@ function renderPanel(panel, live){
 function renderHead(){
   const p = panels.go.preset, q = panels.back.preset;
   wordInto(routeEl, p.route, SC.route());
-  ttlEl.textContent = stopZh(p.from) + ' → ' + stopZh(p.to);
+  ttlEl.textContent = '';
+  const segA = document.createElement('span'); segA.className = 'seg';
+  segA.textContent = stopZh(p.from) + ' →';
+  const segB = document.createElement('span'); segB.className = 'seg'; segB.textContent = stopZh(p.to);
+  ttlEl.append(segA, document.createTextNode(' '), segB);
   ttlEl.title = '去程 ' + stopZh(p.from) + ' → ' + stopZh(p.to)
     + '　·　返程 ' + stopZh(q.from) + ' → ' + stopZh(q.to);
   ttlenEl.textContent = '';
