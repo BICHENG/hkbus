@@ -396,9 +396,9 @@
             outlineWidth: key ? 2 : 1,
             disableDepthTestDistance: Number.POSITIVE_INFINITY
           });
-          stopLabels.add({
+          /* 中英對照：Cesium 的 Label 不解析 HTML，中文與英文要各放一條 */
+          const labelBase = {
             position: pos,
-            text: st.zh || s.stop,
             font: '12px "Microsoft JhengHei","Noto Sans HK",sans-serif',
             fillColor: key ? Cesium.Color.WHITE : Cesium.Color.fromCssColorString('#ffd27a'),
             outlineColor: Cesium.Color.BLACK,
@@ -406,11 +406,22 @@
             style: Cesium.LabelStyle.FILL_AND_OUTLINE,
             horizontalOrigin: Cesium.HorizontalOrigin.LEFT,
             verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
-            pixelOffset: new Cesium.Cartesian2(9, -8),
             scale: 0.95,
             disableDepthTestDistance: Number.POSITIVE_INFINITY,
             distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 60000)
-          });
+          };
+          stopLabels.add(Object.assign({}, labelBase, {
+            text: st.zh || s.stop,
+            pixelOffset: new Cesium.Cartesian2(9, -8)
+          }));
+          stopLabels.add(Object.assign({}, labelBase, {
+            text: st.en || '',
+            font: '10px "Helvetica Neue",Arial,sans-serif',
+            fillColor: Cesium.Color.fromCssColorString('#c9b98c'),
+            outlineWidth: 2,
+            scale: 0.9,
+            pixelOffset: new Cesium.Cartesian2(9, 4)
+          }));
         }
       }
     }
@@ -686,6 +697,11 @@
       row.append(sw, el('b', null, route), el('span', null, ends));
       legendEl.append(row);
     }
+    const note = el('div', 'leg');
+    note.style.color = '#6b5a35';
+    note.style.fontSize = '10px';
+    note.textContent = '去程＝亮色；返程＝淡色並側移 26 公尺';
+    legendEl.append(note);
   }
 
   /* ── HUD ──────────────────────────────────────────────── */
