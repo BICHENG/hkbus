@@ -282,7 +282,12 @@
     const seq = cache.index.routes[route]?.[dir] || [];
     if (!seq.length) return [];
     const lists = seq.map(s => cache.slots[`${route}|${dir}|${s.stop}`] || []);
-    const succ = buildChains(lists, segPrior(route, dir), straightSegs(route, dir));
+    /* 物理下限用「公路距離」而不是直線距離：
+       高速段（紅橋→深圳灣口岸）直線只有 11.5 公里、公路 17.6 公里，
+       用直線會把 9 分半的假配對放過去（112 km/h，物理上不可能）。 */
+    const segs = segmentTable(route, dir);
+    const roadDists = segs.map(s => s.distM);
+    const succ = buildChains(lists, segPrior(route, dir), roadDists);
     const idx = new Map();
     seq.forEach((s, i) => idx.set(s.stop, i));
     const out = [];
