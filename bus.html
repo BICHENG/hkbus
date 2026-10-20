@@ -550,6 +550,9 @@ function buildPanel(key){
 
   selRoute.onchange = async () => {
     panel.preset.route = selRoute.value;
+    /* 取數範圍要跟著換：兩個收藏的線路聯集都要在範圍裡，
+       否則 ensureIndex 不會去拉新線路的站序，下拉會變成空的。 */
+    CB.setScope(Array.from(new Set(Object.values(state.presets).map(p => p.route))));
     await CB.ensureIndex();
     CB.setOrigin(CB.bboxOf());
     CB.buildPaths();

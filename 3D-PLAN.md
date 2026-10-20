@@ -230,7 +230,7 @@ B1 → B2 → B3 → B4 → D2 → D3 → E2
 - **本机系统代理 `127.0.0.1:7897` 会掐断浏览器访问这些香港政府主机**（TLS 握手失败），表现为页面里 fetch 一直 pending、控制台无报错。Node 的 fetch 走直连所以正常——「Node 通、浏览器不通」就是这个原因。
 - 验收网页要用 **headless Chrome + `--no-proxy-server`**：`chrome --headless=new --no-proxy-server --enable-unsafe-swiftshader --use-angle=swiftshader --remote-debugging-port=…`，再用 CDP（`Page.navigate` → `Runtime.evaluate` → `Page.captureScreenshot`）取 HUD 与截图。`--dump-dom`/`--screenshot` 等不到 load 事件会挂死。
 - headless 的软件渲染**不画 Cesium 的 billboard/point**（测试用的洋红 billboard 与青点也画不出），线（Primitive）能画。所以站点与箭头的视觉证据要在能渲染 billboard 的环境取，或把测试点放在视锥内（相机正上方俯视会出画：垂直视场只有 30°）。
-- 逐段核验与推算精度的两支脚本在 `%TEMP%\cdt501bus\`：`check-vehicle.js`（合成班次核车标是否落在折线上）、`sim-accuracy.js`（已知真值的合成班次量时间差）、`measure-live.js`（**运营时段实测**：车上真实班次时量「配對段耗时 vs 實測中位數」「車標離折線多遠」「上車站班距 vs 時刻表班距」，输出 JSON 回填本节台账）。
+- 逐段核验与推算精度的两支脚本在 `%TEMP%\cdt501bus\`：`check-vehicle.js`（合成班次核车标是否落在折线上）、`sim-accuracy.js`（已知真值的合成班次量时间差）、`measure-live.js`（**运营时段实测**：车上真实班次时量「配對段耗时 vs 實測中位數」「車標離折線多遠」「上車站班距 vs 時刻表班距」，输出 JSON 回填本节台账）、`pick-cdp.js`（**交互端到端**：换路线/换站后确认面板、进度、沿线站点真的重画——静态看代码看不出来）。
 
 ---
 
