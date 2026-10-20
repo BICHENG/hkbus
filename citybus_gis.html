@@ -652,6 +652,36 @@
     { name: '深圳灣口岸', stop: '003208', height: 900, heading: 200, pitch: -30, back: 1600 },
     { name: '屯門市中心', stop: '003198', height: 900, heading: 90, pitch: -30, back: 1600 }
   ];
+  const PICK_KEY = 'citybus.bus.pick.v2';   /* 2D 頁存選取的地方 */
+
+  /* 2D 頁選了哪條線、哪個站，3D 頁沿用（同一個 origin 下 localStorage 是共通的） */
+  function readPick() {
+    try {
+      const raw = localStorage.getItem(PICK_KEY);
+      if (!raw) return null;
+      const d = JSON.parse(raw);
+      return (d && d.presets) ? d.presets : null;
+    } catch (e) { return null; }
+  }
+  function pickViews() {
+    const pick = readPick();
+    const out = [];
+    if (pick) {
+      for (const k of ['go', 'back']) {
+        const p = pick[k];
+        if (!p || !p.from) continue;
+        const st = CB.cache.index.stops[p.from];
+        if (!st) continue;
+        out.push({
+          name: (k === 'go' ? '去程·' : '返程·') + (st.zh || p.from),
+          stop: p.from, height: 1000, heading: 300, pitch: -30, back: 1500,
+          tag: (p.route || '') + ' ' + (st.zh || p.from) + ' → ' +
+               ((CB.cache.index.stops[p.to] || {}).zh || p.to)
+        });
+      }
+    }
+    return out;
+  }
   let viewIndex = 0;
   function flyToView(v) {
     const ll = v.stop ? CB.cache.index.stops[v.stop] : v;
@@ -671,11 +701,14 @@
     return true;
   }
   function buildViews() {
-    for (const v of VIEWS) {
+    viewsEl.textContent = '';
+    const all = VIEWS.concat(pickViews());
+    for (const v of all) {
       const b = el('button', 'vbtn');
       b.type = 'button';
       b.append(el('span', null, v.name));
       b.append(el('em', null, v.stop ? '站 ' + v.stop : '全走廊'));
+      if (v.tag) b.title = v.tag;
       b.addEventListener('click', function () { flyToView(v); });
       viewsEl.append(b);
     }
@@ -721,6 +754,8 @@
     srcEl.append(statusRow('3DVM 探針', status.tilesProbe, 'wait'));
     srcEl.append(statusRow('階段', status.stage || '-', 'wait'));
     srcEl.append(statusRow('跟隨', status.follow, status.follow === '跟隨中' ? 'wait' : null));
+    const pk = pickViews()[0];
+    srcEl.append(statusRow('2D 選擇', pk ? pk.tag : '未選', pk ? null : 'wait'));
     srcEl.append(statusRow('首屏', status.perf, 'wait'));
     srcEl.append(statusRow('紋理轉碼 worker',
       workerOK ? '可用' : '被瀏覽器封鎖',
@@ -850,8 +885,9 @@
   btnAnim.addEventListener('click', function () { setAnim(!animOn); });
 
   btnView.addEventListener('click', function () {
-    viewIndex = (viewIndex + 1) % VIEWS.length;
-    if (!flyToView(VIEWS[viewIndex])) viewIndex = (viewIndex + 1) % VIEWS.length;
+    const all = VIEWS.concat(pickViews());
+    viewIndex = (viewIndex + 1) % all.length;
+    if (!flyToView(all[viewIndex])) viewIndex = (viewIndex + 1) % all.length;
   });
 
   /* ── 幾何：把 geometry.js 的折線塞進資料層 ────────────────
@@ -926,6 +962,7 @@
     CB.buildPaths();
     buildRoutes();
     buildStops();
+    buildViews();               // 站序有了，2D 頁選的站也能加成機位
     status.stage = '完成';;
     refreshLegend();
     setViewsEnabled(true);
