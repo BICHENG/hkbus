@@ -655,11 +655,15 @@ function paintTrack(panel, live, leg){
   });
   panel.labs.forEach(l => { l.el.style.left = (axisPos(l.a) * 100).toFixed(2) + '%'; });
 
-  // 車標
+  // 車標：同一班車只畫一個（用上下游到站時間當身份），不同班車各畫各的
   for (const el of [...track.querySelectorAll('.bk')]) el.remove();
   const now = Date.now();
+  const drawn = new Set();
   for (const b of live){
     if (b.route !== leg.plan.route || b.dir !== leg.dir) continue;
+    const key = b.fromEtaMs + '>' + b.toEtaMs;
+    if (drawn.has(key)) continue;
+    drawn.add(key);
     const loc = CB.spanLocate(leg.plan.route, leg.dir, b, now, leg.plan);
     if (!loc) continue;
     const i = document.createElement('i');
