@@ -52,6 +52,7 @@
   .bus .seg{color:#cbc3ae;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .bus u{text-decoration:none;color:var(--muted);font-size:11px;max-width:96px;
     overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .bus.follow{background:rgba(255,176,0,.10)}
   .none{padding:8px 15px 10px;font-size:11.5px;color:var(--muted)}
 
   #left footer{padding:9px 15px;border-top:1px solid var(--line);background:#0e0c08;
@@ -118,12 +119,14 @@
   <span class="sep"></span>
   <button id="btnStops" type="button" class="on">站點</button>
   <button id="btnTrail" type="button" class="on">軌跡</button>
+  <button id="btnAnim" type="button" class="on">動效</button>
   <button id="btnView" type="button">視角</button>
 </div>
 
 <div class="panel" id="hint">
   <div><b>城巴到站 API</b> 推算車輛位置 · <b>地政總署 3D 視覺化地圖</b> 傾斜攝影 · <b>KMD</b> 影像底圖</div>
   <div id="hintWarn" hidden></div>
+  <div style="margin-top:6px"><a href="./bus.html" style="color:#ffb000;text-decoration:none">← 2D 班次屏</a></div>
 </div>
 
 <script src="busdata.js"></script>
@@ -131,6 +134,7 @@
 <script>
 (function () {
   'use strict';
+  const T0 = performance.now();      // 首屏時間的起點
 
   /* ── 外部資源 ───────────────────────────────────────────
      兩個 key 來自 3d.map.gov.hk 前端 files/setting.js 裡公開寫着、實測可用的 key。
@@ -198,7 +202,9 @@
     geo: 'wait', geoText: '載入中',
     tilesProbe: '探測中',
     boot: '',
-    stage: ''
+    stage: '',
+    follow: '未跟隨',
+    perf: '量測中'
   };
   imageryLayer.errorEvent.addEventListener(function () {
     status.imagery = 'bad';
@@ -236,6 +242,7 @@
   const btnRefresh = document.getElementById('btnRefresh');
   const btnStops = document.getElementById('btnStops');
   const btnTrail = document.getElementById('btnTrail');
+  const btnAnim = document.getElementById('btnAnim');
   const btnView = document.getElementById('btnView');
 
   function el(tag, cls, text) {
@@ -465,6 +472,9 @@
 
   /* 攝影模型是建在地面之上的網格，平地地形做 clampToGround 只會把車壓到海平面高度而穿進模型，
      所以給固定海拔並關閉深度測試，讓車永遠看得見。 */
+  let followId = null;          // 正在跟隨的班次
+  let animOn = true;            // 動效開關：到站脉冲與跟隨
+  const BASE_SCALE = 0.55;
   function moveBuses(now) {
     for (const st of busMarks.values()) {
       if (!st.bb.show) continue;
@@ -475,9 +485,43 @@
       /* 貼圖的箭頭指向畫面右方（正東），轉成螢幕座標要減去 π/2：
          北向（方位角 0）在螢幕上是正上方。 */
       st.bb.rotation = Math.PI / 2 - p.head;
+      /* 快到站的車輕微呼吸，讓人一眼看出「這班快到了」 */
+      const remain = (st.bus.toEtaMs - now) / 60000;
+      let scale = BASE_SCALE;
+      if (animOn && remain >= 0 && remain < 2)
+        scale = BASE_SCALE * (1 + 0.35 * Math.abs(Math.sin(now / 240)));
+      st.bb.scale = scale;
+    }
+    if (followId && animOn) {
+      const st = busMarks.get(followId);
+      if (st && st.bb.show) {
+        viewer.camera.lookAt(st.bb.position,
+          new Cesium.HeadingPitchRange(viewer.camera.heading, viewer.camera.pitch, 900));
+      }
     }
   }
   scene.preRender.addEventListener(function () { moveBuses(Date.now()); });
+
+  function setFollow(id) {
+    followId = id;
+    if (!id) {
+      viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY);
+      status.follow = '未跟隨';
+    } else {
+      status.follow = '跟隨中';
+    }
+    renderHud();
+  }
+  function setAnim(on) {
+    animOn = on;
+    if (!on) {
+      followId = null;
+      viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY);
+      status.follow = '未跟隨';
+    }
+    btnAnim.classList.toggle('on', on);
+    renderHud();
+  }
 
   /* ── 傾斜攝影 ───────────────────────────────────────────
      子 tileset 用的是相對 URI（1/tileset.json），不帶 key 會 401；
@@ -638,6 +682,8 @@
     srcEl.append(statusRow('路線幾何', status.geoText, status.geo));
     srcEl.append(statusRow('3DVM 探針', status.tilesProbe, 'wait'));
     srcEl.append(statusRow('階段', status.stage || '-', 'wait'));
+    srcEl.append(statusRow('跟隨', status.follow, status.follow === '跟隨中' ? 'wait' : null));
+    srcEl.append(statusRow('首屏', status.perf, 'wait'));
     srcEl.append(statusRow('紋理轉碼 worker',
       workerOK ? '可用' : '被瀏覽器封鎖',
       workerOK ? 'ok' : 'bad'));
@@ -676,10 +722,14 @@
         }
         for (const b of sub) {
           const row = el('div', 'bus');
+          if (followId === b.id) row.className = 'bus follow';
           const mins = Math.round((b.toEtaMs - now) / 60000);
           row.append(el('em', mins <= 0 ? 'soon' : null, mins <= 0 ? '即將' : mins + ' 分'));
           row.append(el('span', 'seg', stopName(b.fromStop) + ' → ' + stopName(b.toStop)));
           row.append(el('u', null, b.dest || ''));
+          row.title = '點這一下跟隨這班車';
+          row.style.cursor = 'pointer';
+          row.addEventListener('click', function () { setFollow(followId === b.id ? null : b.id); });
           busesEl.append(row);
         }
       }
@@ -758,6 +808,8 @@
     arrowBillboards.show = trailOn;
     btnTrail.classList.toggle('on', trailOn);
   });
+
+  btnAnim.addEventListener('click', function () { setAnim(!animOn); });
 
   btnView.addEventListener('click', function () {
     viewIndex = (viewIndex + 1) % VIEWS.length;
@@ -838,6 +890,9 @@
 
     await pullNow();
     refreshBuses();
+    renderHud();
+
+    status.perf = ((performance.now() - T0) / 1000).toFixed(1) + ' 秒 · 圖層 ' + scene.primitives.length;
     renderHud();
 
     setInterval(function () { refreshBuses(); renderHud(); }, HUD_MS);

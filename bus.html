@@ -169,6 +169,8 @@
     border-radius:6px;padding:5px 12px;font:inherit;font-size:11px;letter-spacing:.1em;cursor:pointer}
   .foot button + button{margin-left:8px}
   .foot button:hover{background:#312718}
+  .foot .link{color:#8a5f04;text-decoration:none;letter-spacing:.06em;font-size:10.5px}
+  .foot .link:hover{color:var(--amber)}
 
   /* ── 窄屏（手機） ───────────────────────────────────── */
   @media (max-width: 560px){
@@ -227,6 +229,7 @@
     <div class="foot">
       <span>城巴 Citybus · 實時到站時間 · 每 30 秒拉一次全量快照</span>
       <span id="stamp"></span>
+      <a class="link" href="./citybus_gis.html">3D GIS 版 →</a>
       <button id="refresh" type="button">立即更新</button>
       <button id="export" type="button">匯出快照</button>
     </div>
