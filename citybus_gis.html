@@ -129,6 +129,7 @@
   <div style="margin-top:6px"><a href="./bus.html" style="color:#ffb000;text-decoration:none">← 2D 班次屏</a></div>
 </div>
 
+<script src="busroutes.js"></script>
 <script src="busdata.js"></script>
 <script src="geometry.js"></script>
 <script>
@@ -759,6 +760,12 @@
     srcEl.append(statusRow('跟隨', status.follow, status.follow === '跟隨中' ? 'wait' : null));
     const pk = pickViews()[0];
     srcEl.append(statusRow('2D 選擇', pk ? pk.tag : '未選', pk ? null : 'wait'));
+    /* 現時班距：三條線各一行，讓人知道路上該等多久 */
+    for (const route of ROUTES) {
+      const f = BUSROUTES.freqNow(route, 'O');
+      const last = BUSROUTES.lastBusIn(route, 'O');
+      srcEl.append(statusRow(route + ' 班距', (f ? f + ' 分' : '—') + (last != null ? ' · 末班 ' + last + ' 分後' : ''), f ? null : 'wait'));
+    }
     srcEl.append(statusRow('首屏', status.perf, 'wait'));
     srcEl.append(statusRow('紋理轉碼 worker',
       workerOK ? '可用' : '被瀏覽器封鎖',
