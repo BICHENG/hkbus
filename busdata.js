@@ -528,7 +528,9 @@
     };
   }
 
-  /* ── 路径：站坐标折线（有 OSM 实路时用实路） ───────── */
+  /* ── 路径：站坐标折线（有 OSM 实路时用实路） ─────────
+     注意：這一層的幾何一律用 [緯度, 經度]（proj/stopPath/bboxOf 一貫）。
+     外部來源若是 [經度, 緯度]（GeoJSON 慣例），塞進來之前要先換序。 */
   const R = 6378137;
   let lat0 = 22.45, lon0 = 113.95;
   function proj(lat, lon) {
@@ -552,7 +554,10 @@
     lon0 = (bbox.west + bbox.east) / 2;
   }
   function bboxOf() {
-    let n = 90, s = 22, w = 113, e = 114;
+    // 初始值要是全球范围：北半球的纬度最大 90，最小 -90。
+    // 早先写成 n=90 / s=22（南半球的习惯），香港在北半球时 n 永远是 90，
+    // 投影原点会落到北纬 56 度，车标会画到西伯利亚去。
+    let n = -90, s = 90, w = 180, e = -180;
     const scan = list => list.forEach(p => {
       n = Math.max(n, p[0]); s = Math.min(s, p[0]); w = Math.min(w, p[1]); e = Math.max(e, p[1]);
     });

@@ -818,7 +818,12 @@
 
   /* ── 幾何：把 geometry.js 的折線塞進資料層 ────────────────
      CB.buildPaths 會優先用 cache.geom 裡的折線，
-     這樣車輛位置（busPosition）與畫面上的線形是同一條路。 */
+     這樣車輛位置（busPosition）與畫面上的線形是同一條路。
+
+     注意兩邊的座標次序不同：
+       geometry.js（GeoJSON／OSRM 慣例）用 [經度, 緯度]
+       busdata.js 內部（proj/stopPath/bboxOf 一貫）用 [緯度, 經度]
+     所以塞進去之前要先換序，否則投影原點會算錯、車標會飛到幾千里外。 */
   function applyGeometry() {
     const GEO = window.GEO;
     if (!GEO || !GEO.routes) return 0;
@@ -828,7 +833,8 @@
       const pts = [];
       for (const leg of g.legs) for (const p of leg.pts) {
         const last = pts[pts.length - 1];
-        if (!last || Math.abs(last[0] - p[0]) > 1e-9 || Math.abs(last[1] - p[1]) > 1e-9) pts.push(p);
+        if (!last || Math.abs(last[0] - p[1]) > 1e-9 || Math.abs(last[1] - p[0]) > 1e-9)
+          pts.push([p[1], p[0]]);            // [lon,lat] → [lat,lon]
       }
       if (pts.length > 2) { CB.cache.geom[key] = pts; n++; }
     }
