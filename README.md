@@ -3,6 +3,9 @@
 香港城巴 B3 / B3A / B3X 三條跨境線的實時到站顯示屏。純靜態頁，雙擊 `bus.html` 就能開，
 不需要任何服務器、API key 或後端。
 
+**線上**：<https://bicheng.github.io/hkbus/>（GitHub Pages，公開倉庫 `BICHENG/hkbus`，從 `main` 分支根目錄發布）
+舊的 `/b3a-bus` 地址不會跳轉，已失效。
+
 - [2D 點陣班次屏](bus.html) — 選路線與上車站，看下一班、在途車輛、沿線進度
 - 3D GIS 版（`citybus_gis.html`）— 開發中，載入香港真傾斜攝影與線路
 
