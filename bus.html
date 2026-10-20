@@ -371,8 +371,11 @@ function wordInto(host, text, scale, flash){
   const chars = [...dotText(text)];
   let w = host._w;
   if (!w || w.n !== chars.length || w.scale !== scale){
+    /* 保留元素原有的 class：直接覆寫 className 會把 .clock 之類的選擇器洗掉，
+       窄屏的媒體查詢就匹配不到（時鐘的排版順序會亂掉）。 */
+    if (!host.dataset.base) host.dataset.base = host.className || '';
     host.textContent = '';
-    host.className = 'word ' + scale;
+    host.className = (host.dataset.base + ' word ' + scale).trim();
     w = {n:chars.length, scale, dots:[], text:''};
     for (let i=0;i<chars.length;i++){
       const d = makeDots();
