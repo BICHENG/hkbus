@@ -124,7 +124,7 @@
 </div>
 
 <div class="panel" id="hint">
-  <div><b>城巴到站 API</b> 推算車輛位置 · <b>地政總署 3D 視覺化地圖</b> 傾斜攝影 · <b>KMD</b> 影像底圖</div>
+  <div><b>城巴到站 API</b>（運輸署 DATA.GOV.HK）推算車輛位置 · <b>地政總署 3D 視覺化地圖</b> 傾斜攝影 · <b>KMD</b> 影像底圖</div>
   <div id="hintWarn" hidden></div>
   <div style="margin-top:6px"><a href="./bus.html" style="color:#ffb000;text-decoration:none">← 2D 班次屏</a></div>
 </div>
@@ -799,7 +799,7 @@
           const mins = Math.round((b.toEtaMs - now) / 60000);
           row.append(el('em', mins <= 0 ? 'soon' : null, mins <= 0 ? '即將' : mins + ' 分'));
           row.append(el('span', 'seg', stopName(b.fromStop) + ' → ' + stopName(b.toStop)));
-          row.append(el('u', null, b.dest || ''));
+          row.append(el('u', null, (b.dest || '') + (b.rmk ? ' · ' + b.rmk : '')));
           row.title = '點這一下跟隨這班車';
           row.style.cursor = 'pointer';
           row.addEventListener('click', function () { setFollow(followId === b.id ? null : b.id); });

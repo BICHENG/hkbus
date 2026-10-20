@@ -189,7 +189,7 @@
       let base = null;
       if (hit >= 0) { used.add(hit); base = fresh[hit]; }
       next.push(Object.assign({}, base || {}, {
-        eta: b.eta, etaMs: b.etaMs, dest: b.dest, destEn: b.destEn, rmk: b.rmk,
+        eta: b.eta, etaMs: b.etaMs, dest: b.dest, destEn: b.destEn, rmk: b.rmk, rmkEn: b.rmkEn,
         etaSeq: b.etaSeq, seenAt: now, stale: false, stop
       }));
     }
@@ -301,7 +301,7 @@
         fromEtaMs: a.etaMs, toEtaMs: b.etaMs,
         progress: (now - a.etaMs) / dur,
         conf: 'high',
-        dest: b.dest || a.dest, rmk: b.rmk || a.rmk, etaSeq: b.etaSeq
+        dest: b.dest || a.dest, rmk: b.rmk || a.rmk, rmkEn: b.rmkEn || a.rmkEn, etaSeq: b.etaSeq
       });
     }
     return out;
@@ -669,7 +669,7 @@
         const key = `${j.route}|${b.dir}|${b.stop}`;
         if (!byKey.has(key)) byKey.set(key, []);
         byKey.get(key).push({eta: b.eta, etaMs: Date.parse(b.eta), dest: b.dest_tc,
-                             destEn: b.dest_en, rmk: b.rmk_tc, etaSeq: b.eta_seq});
+                             destEn: b.dest_en, rmk: b.rmk_tc, rmkEn: b.rmk_en, etaSeq: b.eta_seq});
       }
     }
     for (const [key, list] of byKey) {

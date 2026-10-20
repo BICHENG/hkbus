@@ -76,6 +76,7 @@
   td{padding:9px 0;border-bottom:1px solid var(--line);vertical-align:middle}
   tr:last-child td{border-bottom:0}
   .dest{color:var(--text);font-size:14px;margin-bottom:3px}
+  .rmk{color:#c8892a;font-size:11px;margin-top:3px;letter-spacing:.02em}
   .none{color:var(--muted);padding:10px 0;font-size:12.5px}
 
   /* ── 線路進度 ───────────────────────────────────────── */
@@ -227,7 +228,7 @@
     <div id="legs"></div>
 
     <div class="foot">
-      <span>城巴 Citybus · 實時到站時間 · 每 30 秒拉一次全量快照</span>
+      <span>城巴 Citybus · 運輸署 DATA.GOV.HK 實時到站 · 每 30 秒拉一次全量快照</span>
       <span id="stamp"></span>
       <a class="link" href="./citybus_gis.html">3D GIS 版 →</a>
       <button id="refresh" type="button">立即更新</button>
@@ -880,14 +881,16 @@ function renderPanel(panel, live){
       const zh = document.createElement('div');
       zh.className = 'dest';
       const en = document.createElement('span');
-      tdD.append(zh, en);
+      const rmk = document.createElement('div');
+      rmk.className = 'rmk';
+      tdD.append(zh, en, rmk);
       const tdM = document.createElement('td');
       tdM.className = 'r';
       const mw = document.createElement('span');
       tdM.append(mw);
       tr.append(tdT, tdD, tdM);
       panel.tbody.append(tr);
-      s._tw = tw; s._zh = zh; s._en = en; s._mw = mw;
+      s._tw = tw; s._zh = zh; s._en = en; s._mw = mw; s._rmk = rmk;
     }
   }
   for (const s of list){
@@ -895,6 +898,8 @@ function renderPanel(panel, live){
     wordInto(s._tw, HK_MIN.format(new Date(s.etaMs)), SC.eta());
     s._zh.textContent = s.dest || '';
     wordInto(s._en, s.destEn || '', 's1');
+    /* 接口的備註（例如「分站不停 / Short stop」）——港味就在這種細節裡 */
+    if (s._rmk) s._rmk.textContent = (s.rmk || '') + (s.rmkEn ? ' · ' + s.rmkEn : '');
     const left = (s.etaMs - Date.now())/60000;
     flapValue(s._mw, left <= 0 ? '即將' : (left < 1 ? '<1' : String(Math.round(left))), SC.min());
   }
