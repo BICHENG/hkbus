@@ -789,13 +789,13 @@ function renderPanel(panel, live){
       + ` · 現時班距 <b>${f ? f : '—'}</b> 分` + (last != null ? ` · 末班尚有 <b>${last}</b> 分` : '')
     : '';
 
-  // 本站接下来几班（同一分鐘的只留一個）
+  // 本站接下来几班（顯示同一分鐘的只留一個）
   const raw = (CB.cache.slots[`${leg.plan.route}|${leg.dir}|${leg.board.stop}`] || [])
     .filter(s => s.etaMs > Date.now() - 60000);
   const list = [];
   const seenMin = new Set();
   for (const s of raw){
-    const k = Math.floor(s.etaMs / 60000);
+    const k = HK_MIN.format(new Date(s.etaMs));
     if (seenMin.has(k)) continue;
     seenMin.add(k);
     list.push(s);
