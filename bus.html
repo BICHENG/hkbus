@@ -1,0 +1,918 @@
+<!doctype html>
+<html lang="zh-HK">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>城巴 B3 系列 · 實時班次</title>
+<style>
+  :root{
+    --board:#14120e; --flap:#1c1811; --amber:#ffb000; --amber-dim:#8a5f04; --text:#f0e6d2;
+    --line:#201a11; --muted:#6b5a35; --warn:#d8573a; --red:#b8332a;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:#0a0907;color:var(--text);
+    font:14px/1.5 ui-monospace,"SF Mono",Menlo,Consolas,"Noto Sans HK","Microsoft JhengHei",monospace;
+    -webkit-font-smoothing:antialiased}
+  .wrap{max-width:780px;margin:0 auto;padding:26px 18px 44px;position:relative}
+  .wrap::after{content:"";position:fixed;inset:0;pointer-events:none;
+    background:repeating-linear-gradient(rgba(255,176,0,.035) 0 1px,transparent 1px 3px)}
+
+  .frame{background:var(--board);border:1px solid #000;border-radius:14px;overflow:hidden;
+    box-shadow:0 0 0 1px #2c261b inset,0 24px 60px rgba(0,0,0,.6)}
+
+  /* ── 頂部發車牌 ─────────────────────────────────────── */
+  .head{display:flex;align-items:flex-start;gap:16px;padding:16px 20px;
+    background:linear-gradient(#241d13,#16120c);border-bottom:1px solid #000}
+  .badge{flex:none;display:flex;align-items:center;gap:8px;padding:8px 12px 8px 10px;border-radius:8px;
+    background:linear-gradient(#c33a2e,#8e241b);box-shadow:0 2px 0 #4d140f,inset 0 1px 0 rgba(255,255,255,.22)}
+  .badge em{font-style:normal;font-size:12px;letter-spacing:.14em;color:#f6d9d3}
+  .title{flex:1;min-width:0}
+  .title h1{margin:0;font-size:19px;letter-spacing:.04em;color:var(--text);font-weight:600;line-height:1.35}
+  .title .en{margin-top:8px;display:flex;flex-direction:column;gap:5px;align-items:flex-start}
+  .clock{flex:none}
+
+  /* 点阵：一个字符 5×7 个点，字模表只写一次，所有格都复用 */
+  .word{display:inline-flex;gap:var(--cg,4px);vertical-align:middle}
+  .word.s0{--d:2px;--cg:1px}
+  .word.s1{--d:3px;--cg:2px}
+  .word.s2{--d:5px;--cg:4px}
+  .word.s3{--d:7px;--cg:5px}
+  .dots{display:inline-grid;grid-template-columns:repeat(5,var(--d));grid-template-rows:repeat(7,var(--d));
+    gap:1px}
+  .dots i{display:block;border-radius:50%;background:#241c0d}
+  .dots i.on{background:var(--amber);box-shadow:0 0 7px rgba(255,176,0,.6)}
+  .word.flash .dots i.on{animation:led .4s ease-out}
+  @keyframes led{from{opacity:.15;box-shadow:0 0 2px rgba(255,176,0,.2)}}
+
+  /* ── 收藏：去程 / 返程 ───────────────────────────────── */
+  .leg{padding:0 0 20px;border-bottom:1px solid #000}
+  .leg:last-of-type{border-bottom:0}
+  .leg-head{display:flex;align-items:baseline;gap:10px;padding:15px 20px 0;flex-wrap:wrap}
+  .leg-head b{font-size:16px;color:var(--amber);letter-spacing:.14em}
+  .leg-head .tag{font-size:10px;letter-spacing:.18em;color:var(--muted);text-transform:uppercase;
+    border:1px solid #3a2f1c;border-radius:4px;padding:2px 7px}
+  .leg-head em{margin-left:auto;font-style:normal;font-size:11px;color:var(--muted);letter-spacing:.06em}
+  .leg-head .bad{font-style:normal;color:var(--warn);font-size:11px}
+  .leg-head .note{font-style:normal;font-size:11px;color:#c8892a;letter-spacing:.04em}
+
+  .pick{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;padding:11px 20px 0}
+  .pick label{display:flex;align-items:center;gap:6px;font-size:10px;letter-spacing:.18em;
+    color:#7a6636;text-transform:uppercase}
+  .pick select{background:#1d1811;color:var(--amber);border:1px solid #3a2f1c;border-radius:6px;
+    padding:5px 7px;font:inherit;font-size:12px;letter-spacing:.02em;max-width:190px}
+  .pick select:focus{outline:1px solid var(--amber)}
+  .pick button{background:#241d13;color:var(--amber);border:1px solid #3a2f1c;border-radius:6px;
+    padding:5px 10px;font:inherit;font-size:12px;cursor:pointer}
+  .pick button:hover{background:#312718}
+
+  .hint{padding:9px 20px 0;font-size:11px;color:var(--muted);letter-spacing:.04em}
+  .hint b{color:#9a8a56;font-weight:400}
+
+  table{width:calc(100% - 40px);margin:14px 20px 0;border-collapse:collapse}
+  th{font-size:10px;letter-spacing:.2em;color:#7a6636;font-weight:500;text-align:left;
+    padding:0 0 7px;border-bottom:1px solid #2a2318}
+  th.r,td.r{text-align:right}
+  td{padding:9px 0;border-bottom:1px solid var(--line);vertical-align:middle}
+  tr:last-child td{border-bottom:0}
+  .dest{color:var(--text);font-size:14px;margin-bottom:3px}
+  .none{color:var(--muted);padding:10px 0;font-size:12.5px}
+
+  /* ── 線路進度 ───────────────────────────────────────── */
+  .cap{font-size:10px;letter-spacing:.2em;color:#6b5a35;text-transform:uppercase;margin:20px 20px 2px;
+    display:flex;align-items:center;gap:10px}
+  .cap em{font-style:normal;margin-left:auto;letter-spacing:.05em;text-transform:none;color:#8a7a4a;
+    font-size:11px}
+  .seg{display:flex;border:1px solid #3a2f1c;border-radius:6px;overflow:hidden}
+  .seg button{background:transparent;border:0;border-radius:0;padding:4px 9px;color:var(--muted);
+    font:inherit;font-size:10px;letter-spacing:.14em;cursor:pointer;text-transform:uppercase}
+  .seg button.on{background:#312718;color:var(--amber)}
+
+  .track{margin:22px 20px 0;position:relative;height:40px}
+  .track .rail{position:absolute;left:0;right:0;top:13px;height:2px;
+    background:linear-gradient(90deg,#3a2f1c,#6b5a35);border-radius:2px}
+  .track .ride{position:absolute;top:11px;height:6px;border-radius:3px;
+    background:rgba(255,176,0,.16);box-shadow:0 0 0 1px rgba(255,176,0,.28)}
+  .track .st{position:absolute;top:10px;width:7px;height:7px;margin-left:-3.5px;border-radius:50%;
+    background:#3a3226;border:1px solid #000}
+  .track .st.here{background:#6b5a35}
+  .track .st.me{background:transparent;border:2px solid var(--amber);width:11px;height:11px;
+    top:8px;margin-left:-5.5px;box-shadow:0 0 8px rgba(255,176,0,.5)}
+  .track .st.end{background:var(--amber-dim);border-color:#000}
+  .track .bk{position:absolute;top:7px;width:13px;height:13px;margin-left:-6.5px;border-radius:3px;
+    background:var(--amber);box-shadow:0 0 12px rgba(255,176,0,.85);animation:pulse 1.6s ease-in-out infinite;z-index:3}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.55}}
+  .track .lab{position:absolute;top:24px;font-size:10.5px;color:var(--muted);white-space:nowrap;
+    transform:translateX(-50%)}
+  .track .lab.me{color:var(--amber)}
+  .track .lab.end{color:#a08a4a}
+  .track .lab.l{transform:translateX(0)}
+  .track .lab.r{transform:translateX(-100%)}
+
+  /* ── 沿線站點：中英，英文點陣（細字，裝不下就捲） ───── */
+  .near{margin:8px 20px 0;padding:0 6px 0 0;list-style:none;max-height:150px;overflow-y:auto;
+    scrollbar-width:thin;scrollbar-color:#3a2f1c transparent}
+  .near::-webkit-scrollbar{width:6px}
+  .near::-webkit-scrollbar-thumb{background:#3a2f1c;border-radius:3px}
+  .near li{display:flex;align-items:center;gap:10px;padding:3px 0;border-bottom:1px solid #191510}
+  .near li:last-child{border-bottom:0}
+  .near .zh{color:#c9bfa8;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+    max-width:230px;flex:none}
+  .near .id{color:#6b5a35;font-size:10px;letter-spacing:.04em;white-space:nowrap}
+  .near .en{margin-left:auto;opacity:.8}
+  .near li.me .zh{color:var(--amber)}
+  .near li.me .id{color:#8a6a2a}
+
+  /* ── 在途車輛：花括號列出到各站的剩餘時間與里程 ───────── */
+  .transit{margin:8px 20px 0;max-height:260px;overflow-y:auto;
+    scrollbar-width:thin;scrollbar-color:#3a2f1c transparent}
+  .transit::-webkit-scrollbar{width:6px}
+  .transit::-webkit-scrollbar-thumb{background:#3a2f1c;border-radius:3px}
+  .bus{padding:8px 0;border-bottom:1px solid #191510}
+  .bus:last-child{border-bottom:0}
+  .bus .row{display:flex;align-items:baseline;gap:9px}
+  .bus i.dot{width:9px;height:9px;border-radius:2px;background:var(--amber);flex:none;
+    box-shadow:0 0 7px rgba(255,176,0,.7);transform:translateY(1px)}
+  .bus i.dot.away{background:#6b5a35;box-shadow:none}
+  .bus .path{color:var(--text);font-size:13px}
+  .bus .path u{text-decoration:none;color:var(--muted);font-size:11px;margin-left:7px}
+  .bus .eta{margin-left:auto;color:var(--amber);font-variant-numeric:tabular-nums;font-size:12px;white-space:nowrap}
+  .bus .eta.off{color:#6b5a35}
+  /* 花括號效果：左側一條豎線加上下兩條短橫 */
+  .brace{margin:6px 0 0 13px;padding:4px 0 4px 10px;border-left:2px solid #3a2f1c;position:relative}
+  .brace::before,.brace::after{content:"";position:absolute;left:-2px;width:8px;height:2px;background:#3a2f1c}
+  .brace::before{top:0}
+  .brace::after{bottom:0}
+  .brace div{display:flex;gap:8px;font-size:11px;color:#9a8a56;padding:2px 0;align-items:baseline}
+  .brace div b{font-weight:400;color:var(--text);font-size:11.5px}
+  .brace div u{text-decoration:none;color:#7a6636}
+  .brace div em{font-style:normal;margin-left:auto;color:var(--amber);font-variant-numeric:tabular-nums}
+
+  /* ── 全線站點 ───────────────────────────────────────── */
+  details{margin:12px 20px 0}
+  summary{cursor:pointer;font-size:10px;letter-spacing:.16em;color:var(--muted);text-transform:uppercase;
+    list-style:none}
+  summary::-webkit-details-marker{display:none}
+  summary::before{content:"▸ ";}
+  details[open] summary::before{content:"▾ ";}
+  .stops{margin:9px 0 0;padding:0;list-style:none;columns:2;column-gap:22px;max-height:230px;
+    overflow-y:auto;scrollbar-width:thin;scrollbar-color:#3a2f1c transparent}
+  .stops::-webkit-scrollbar{width:6px}
+  .stops::-webkit-scrollbar-thumb{background:#3a2f1c;border-radius:3px}
+  .stops li{font-size:11.5px;color:var(--muted);padding:3px 0;break-inside:avoid}
+  .stops li b{color:var(--text);font-weight:400}
+  .stops li s{text-decoration:none;color:#57492a;font-size:9.5px;display:block;letter-spacing:.04em}
+
+  .foot{display:flex;align-items:center;gap:14px;padding:12px 20px;background:#0e0c08;
+    border-top:1px solid #000;font-size:11px;color:var(--muted);letter-spacing:.06em}
+  .foot button{margin-left:auto;background:#241d13;color:var(--amber);border:1px solid #3a2f1c;
+    border-radius:6px;padding:5px 12px;font:inherit;font-size:11px;letter-spacing:.1em;cursor:pointer}
+  .foot button + button{margin-left:8px}
+  .foot button:hover{background:#312718}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="frame">
+    <div class="head">
+      <div class="badge"><em>城巴</em><div id="route"></div></div>
+      <div class="title">
+        <h1 id="ttl">—</h1>
+        <div class="en" id="ttlen"></div>
+      </div>
+      <div class="clock" id="clock"></div>
+    </div>
+
+    <div id="legs"></div>
+
+    <div class="foot">
+      <span>城巴 Citybus · 實時到站時間 · 每 30 秒拉一次全量快照</span>
+      <span id="stamp"></span>
+      <button id="refresh" type="button">立即更新</button>
+      <button id="export" type="button">匯出快照</button>
+    </div>
+  </div>
+</div>
+
+<script src="busroutes.js"></script>
+<script src="busdata.js"></script>
+<script>
+/* ── 点阵字模：5×7，'1' 点亮，'.' 换行。整页所有格子都从这张表取 ── */
+const FONT = {
+  '0':'01110.10001.10011.10101.11001.10001.01110',
+  '1':'00100.01100.00100.00100.00100.00100.01110',
+  '2':'01110.10001.00001.00010.00100.01000.11111',
+  '3':'11111.00010.00100.00010.00001.10001.01110',
+  '4':'00010.00110.01010.10010.11111.00010.00010',
+  '5':'11111.10000.11110.00001.00001.10001.01110',
+  '6':'00110.01000.10000.11110.10001.10001.01110',
+  '7':'11111.00001.00010.00100.01000.01000.01000',
+  '8':'01110.10001.10001.01110.10001.10001.01110',
+  '9':'01110.10001.10001.01111.00001.00010.01100',
+  'A':'01110.10001.10001.11111.10001.10001.10001',
+  'B':'11110.10001.10001.11110.10001.10001.11110',
+  'C':'01110.10001.10000.10000.10000.10001.01110',
+  'D':'11100.10010.10001.10001.10001.10010.11100',
+  'E':'11111.10000.10000.11110.10000.10000.11111',
+  'F':'11111.10000.10000.11110.10000.10000.10000',
+  'G':'01110.10001.10000.10111.10001.10001.01111',
+  'H':'10001.10001.10001.11111.10001.10001.10001',
+  'I':'01110.00100.00100.00100.00100.00100.01110',
+  'J':'00111.00010.00010.00010.00010.10010.01100',
+  'K':'10001.10010.10100.11000.10100.10010.10001',
+  'L':'10000.10000.10000.10000.10000.10000.11111',
+  'M':'10001.11011.10101.10101.10001.10001.10001',
+  'N':'10001.11001.10101.10011.10001.10001.10001',
+  'O':'01110.10001.10001.10001.10001.10001.01110',
+  'P':'11110.10001.10001.11110.10000.10000.10000',
+  'Q':'01110.10001.10001.10001.10101.10010.01101',
+  'R':'11110.10001.10001.11110.10100.10010.10001',
+  'S':'01111.10000.10000.01110.00001.00001.11110',
+  'T':'11111.00100.00100.00100.00100.00100.00100',
+  'U':'10001.10001.10001.10001.10001.10001.01110',
+  'V':'10001.10001.10001.10001.10001.01010.00100',
+  'W':'10001.10001.10001.10101.10101.11011.10001',
+  'X':'10001.10001.01010.00100.01010.10001.10001',
+  'Y':'10001.10001.01010.00100.00100.00100.00100',
+  'Z':'11111.00001.00010.00100.01000.10000.11111',
+  ' ':'00000.00000.00000.00000.00000.00000.00000',
+  ':':'00000.00100.00100.00000.00100.00100.00000',
+  '-':'00000.00000.00000.11111.00000.00000.00000',
+  '.':'00000.00000.00000.00000.00000.00110.00110',
+  ',':'00000.00000.00000.00000.00110.00110.00100',
+  '<':'00010.00100.01000.10000.01000.00100.00010',
+  '>':'01000.00100.00010.00001.00010.00100.01000',
+  '/':'00001.00010.00010.00100.01000.01000.10000',
+  '?':'01110.10001.00001.00010.00100.00000.00100',
+  '(':'00010.00100.01000.01000.01000.00100.00010',
+  ')':'01000.00100.00010.00010.00010.00100.01000',
+  '+':'00000.00100.00100.11111.00100.00100.00000',
+  '#':'01010.01010.11111.01010.11111.01010.01010'
+};
+const GLYPH = {};
+for (const ch in FONT) GLYPH[ch] = FONT[ch].split('.');
+const dotText = s => String(s).toUpperCase().replace(/[^A-Z0-9 ,.:\-/<>()+#?]/g, '');
+
+/* ── 两个收藏：去程 / 返程，各自选线路与站 ────────────── */
+const PICK_KEY = 'citybus.bus.pick.v2';
+const CTX = 3;                         // 进度条两端各多看几个站
+const state = {
+  axis: 'time',
+  presets: {
+    go:   {zh:'去程', route:'B3A', from:'003261', to:'003208'},
+    back: {zh:'返程', route:'B3A', from:'003208', to:'003261'}
+  }
+};
+function loadPick(){
+  try{
+    const raw = localStorage.getItem(PICK_KEY);
+    if (!raw) return;
+    const d = JSON.parse(raw);
+    if (d.axis === 'dist') state.axis = 'dist';
+    for (const k of ['go','back']){
+      const p = d.presets && d.presets[k];
+      if (!p) continue;
+      if (CB.ALL_ROUTES.includes(p.route)) state.presets[k].route = p.route;
+      if (p.from) state.presets[k].from = p.from;
+      if (p.to) state.presets[k].to = p.to;
+    }
+  }catch(e){}
+}
+function savePick(){
+  try{ localStorage.setItem(PICK_KEY, JSON.stringify(state)); }catch(e){}
+}
+
+const HK_MIN = new Intl.DateTimeFormat('en-GB',
+  {timeZone:'Asia/Hong_Kong',hour:'2-digit',minute:'2-digit',hour12:false,hourCycle:'h23'});
+const HK_SEC = new Intl.DateTimeFormat('en-GB',
+  {timeZone:'Asia/Hong_Kong',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false,hourCycle:'h23'});
+
+const legsEl   = document.getElementById('legs');
+const clockEl  = document.getElementById('clock');
+const routeEl  = document.getElementById('route');
+const stampEl  = document.getElementById('stamp');
+const ttlEl    = document.getElementById('ttl');
+const ttlenEl  = document.getElementById('ttlen');
+
+const stopZh = id => (CB.cache.index.stops[id]||{}).zh || id;
+const stopEn = id => (CB.cache.index.stops[id]||{}).en || id;
+
+/* ── 点阵字格 ───────────────────────────────────────── */
+function makeDots(){
+  const el = document.createElement('span');
+  el.className = 'dots';
+  const cells = [];
+  for (let i=0;i<35;i++){
+    const d = document.createElement('i');
+    el.append(d);
+    cells.push(d);
+  }
+  return {el, cells};
+}
+function setDots(dot, ch){
+  const g = GLYPH[ch] || GLYPH['?'];
+  for (let r=0;r<7;r++)
+    for (let c=0;c<5;c++)
+      dot.cells[r*5+c].className = g[r][c] === '1' ? 'on' : 'off';
+}
+function wordInto(host, text, scale, flash){
+  const chars = [...dotText(text)];
+  let w = host._w;
+  if (!w || w.n !== chars.length || w.scale !== scale){
+    host.textContent = '';
+    host.className = 'word ' + scale;
+    w = {n:chars.length, scale, dots:[], text:''};
+    for (let i=0;i<chars.length;i++){
+      const d = makeDots();
+      host.append(d.el);
+      w.dots.push(d);
+    }
+    host._w = w;
+  }
+  chars.forEach((ch,i) => setDots(w.dots[i], ch));
+  if (w.text !== chars.join('')){
+    w.text = chars.join('');
+    if (flash === false) return;
+    host.classList.add('flash');
+    clearTimeout(host._t);
+    host._t = setTimeout(() => host.classList.remove('flash'), 420);
+  }
+}
+function flapValue(host, text, scale){
+  const t = String(text);
+  if (/^\d+$/.test(t)) wordInto(host, t, scale);
+  else {
+    host.textContent = '';
+    host.className = 'rmk';
+    host.textContent = t;
+  }
+}
+
+/* ── 选站栏 ─────────────────────────────────────────── */
+function routeStops(route){
+  const o = CB.cache.index.routes[route]?.O || [];
+  const i = CB.cache.index.routes[route]?.I || [];
+  const seen = new Set(), out = [];
+  for (const s of [...o, ...i]) if (!seen.has(s.stop)) { seen.add(s.stop); out.push(s.stop); }
+  return out;
+}
+function fillStops(panel){
+  const p = panel.preset;
+  const list = routeStops(p.route);
+  for (const [sel, cur] of [[panel.selFrom, p.from], [panel.selTo, p.to]]){
+    sel.textContent = '';
+    for (const id of list){
+      const o = document.createElement('option');
+      o.value = id;
+      o.textContent = stopZh(id) + ' · ' + id;
+      sel.append(o);
+    }
+    sel.value = list.includes(cur) ? cur : (list[0] || '');
+  }
+  p.from = panel.selFrom.value;
+  p.to = panel.selTo.value;
+}
+function fillRoutes(panel){
+  panel.selRoute.textContent = '';
+  for (const r of CB.ALL_ROUTES){
+    const o = document.createElement('option');
+    o.value = r;
+    o.textContent = '城巴 ' + r;
+    panel.selRoute.append(o);
+  }
+  panel.selRoute.value = panel.preset.route;
+}
+
+/* 把「起點 → 終點」放到線路上：挑一個真的從起點開到終點的方向 */
+function resolveLeg(p){
+  for (const d of ['O','I']){
+    const a = CB.resolveStop(p.route, d, p.from);
+    const b = CB.resolveStop(p.route, d, p.to);
+    if (!a || !b || a.stop === b.stop) continue;
+    if (a.idx >= b.idx) continue;
+    const plan = CB.spanPlan(p.route, d, a.stop, b.stop, CTX);
+    if (!plan) continue;
+    return {dir:d, board:a, alight:b, plan};
+  }
+  return null;
+}
+
+/* ── 面板骨架 ───────────────────────────────────────── */
+function buildPanel(key){
+  const p = state.presets[key];
+  const sec = document.createElement('section');
+  sec.className = 'leg';
+
+  const head = document.createElement('div');
+  head.className = 'leg-head';
+  const b = document.createElement('b'); b.textContent = p.zh;
+  const tag = document.createElement('span'); tag.className = 'tag';
+  const note = document.createElement('i'); note.className = 'note';
+  const em = document.createElement('em');
+  head.append(b, tag, note, em);
+  sec.append(head);
+
+  const pick = document.createElement('div');
+  pick.className = 'pick';
+  const mkLabel = (t, sel) => {
+    const l = document.createElement('label');
+    l.textContent = t;
+    l.append(sel);
+    return l;
+  };
+  const selRoute = document.createElement('select');
+  const selFrom = document.createElement('select');
+  const selTo = document.createElement('select');
+  const swap = document.createElement('button');
+  swap.type = 'button'; swap.textContent = '⇄'; swap.title = '交換起點與終點';
+  pick.append(mkLabel('路線', selRoute), mkLabel('起點', selFrom), mkLabel('終點', selTo), swap);
+  sec.append(pick);
+
+  const hint = document.createElement('div');
+  hint.className = 'hint';
+  sec.append(hint);
+
+  const table = document.createElement('table');
+  const thead = document.createElement('thead');
+  const hr = document.createElement('tr');
+  for (const [t, cls] of [['到站時間',''],['目的地',''],['分鐘','r']]){
+    const th = document.createElement('th');
+    if (cls) th.className = cls;
+    th.textContent = t;
+    hr.append(th);
+  }
+  thead.append(hr);
+  table.append(thead);
+  const tbody = document.createElement('tbody');
+  table.append(tbody);
+  sec.append(table);
+
+  const cap = document.createElement('div');
+  cap.className = 'cap';
+  const capT = document.createElement('span');
+  capT.textContent = '線路進度';
+  const seg = document.createElement('div');
+  seg.className = 'seg';
+  const bTime = document.createElement('button'); bTime.type = 'button'; bTime.textContent = '時間軸';
+  const bDist = document.createElement('button'); bDist.type = 'button'; bDist.textContent = '里程軸';
+  seg.append(bTime, bDist);
+  const capM = document.createElement('em');
+  cap.append(capT, seg, capM);
+  sec.append(cap);
+  const track = document.createElement('div');
+  track.className = 'track';
+  sec.append(track);
+
+  const nearCap = document.createElement('div');
+  nearCap.className = 'cap';
+  nearCap.textContent = '沿線站點';
+  sec.append(nearCap);
+  const near = document.createElement('ol');
+  near.className = 'near';
+  sec.append(near);
+
+  const cap2 = document.createElement('div');
+  cap2.className = 'cap';
+  cap2.textContent = '在途車輛';
+  sec.append(cap2);
+  const transit = document.createElement('div');
+  transit.className = 'transit';
+  sec.append(transit);
+
+  const det = document.createElement('details');
+  const sum = document.createElement('summary');
+  sum.textContent = '全線站點';
+  const ol = document.createElement('ol');
+  ol.className = 'stops';
+  det.append(sum, ol);
+  sec.append(det);
+
+  legsEl.append(sec);
+  const panel = {key, preset:p, sec, head, tag, note, em, selRoute, selFrom, selTo, swap,
+                 hint, tbody, track, capM, near, transit, ol, bTime, bDist,
+                 sig:null, stSig:null, trSig:null, nearSig:null, olSig:null, dots:[], labs:[]};
+
+  selRoute.onchange = async () => {
+    panel.preset.route = selRoute.value;
+    await CB.ensureIndex();
+    CB.setOrigin(CB.bboxOf());
+    CB.buildPaths();
+    const list = routeStops(panel.preset.route);
+    const def = (BUSROUTES.defaults && BUSROUTES.defaults[panel.preset.route]) || {};
+    if (!list.includes(panel.preset.from)) panel.preset.from = (def.a && list.includes(def.a)) ? def.a : list[0];
+    if (!list.includes(panel.preset.to))   panel.preset.to   = (def.b && list.includes(def.b)) ? def.b : list[list.length-1];
+    fillStops(panel);
+    savePick();
+    render();
+  };
+  selFrom.onchange = () => { panel.preset.from = selFrom.value; savePick(); render(); };
+  selTo.onchange   = () => { panel.preset.to   = selTo.value;   savePick(); render(); };
+  swap.onclick = () => {
+    const t = selFrom.value;
+    selFrom.value = selTo.value;
+    selTo.value = t;
+    panel.preset.from = selFrom.value;
+    panel.preset.to = selTo.value;
+    savePick();
+    render();
+  };
+  bTime.onclick = () => setAxis('time');
+  bDist.onclick = () => setAxis('dist');
+  return panel;
+}
+const panels = {};
+for (const k of ['go','back']) panels[k] = buildPanel(k);
+
+function setAxis(axis){
+  state.axis = axis;
+  for (const k in panels){
+    panels[k].bTime.classList.toggle('on', axis === 'time');
+    panels[k].bDist.classList.toggle('on', axis === 'dist');
+    panels[k].stSig = null;
+  }
+  savePick();
+  render();
+}
+
+/* ── 进度条 ─────────────────────────────────────────── */
+function axisPos(a){ return state.axis === 'dist' ? a.distPos : a.timePos; }
+
+function paintTrack(panel, live, leg){
+  const plan = leg.plan;
+  const track = panel.track;
+  panel.capM.textContent =
+      `本段 ${Math.round(plan.rideMs/60000)} 分 · ${(plan.rideDist/1000).toFixed(1)} km`
+    + (plan.observed < plan.segCount ? `（${plan.segCount - plan.observed} 段用推算速度）` : '（逐段實測）');
+
+  const key = plan.axis.map(a => a.stop).join(',');
+  if (panel.stSig !== key){
+    panel.stSig = key;
+    track.textContent = '';
+    panel.dots = []; panel.labs = [];
+    const rail = document.createElement('div');
+    rail.className = 'rail';
+    track.append(rail);
+
+    for (const a of plan.axis){
+      const i = document.createElement('i');
+      i.className = 'st' + (a.board ? ' me' : (a.alight ? ' end' : (a.ride ? ' here' : '')));
+      i.title = `${stopZh(a.stop)} · ${stopEn(a.stop)} · 第 ${a.seq} 站`;
+      track.append(i);
+      panel.dots.push(i);
+    }
+    const ride = document.createElement('div');
+    ride.className = 'ride';
+    const b = plan.axis.find(a => a.board), e = plan.axis.find(a => a.alight);
+    if (b && e){
+      ride.style.left = (Math.min(axisPos(b), axisPos(e)) * 100).toFixed(2) + '%';
+      ride.style.width = (Math.abs(axisPos(e) - axisPos(b)) * 100).toFixed(2) + '%';
+    }
+    track.append(ride);
+
+    const mk = (text, cls, a) => {
+      const d = document.createElement('div');
+      d.className = 'lab ' + cls;
+      d.textContent = text;
+      track.append(d);
+      panel.labs.push({el:d, a});
+      return d;
+    };
+    const f = plan.axis[0], l = plan.axis[plan.axis.length - 1];
+    mk(stopZh(f.stop), 'l', f);
+    mk(stopZh(l.stop), 'r', l);
+    const bo = plan.axis.find(a => a.board);
+    if (bo) mk('上車 ' + stopZh(bo.stop), 'me', bo);
+    const al = plan.axis.find(a => a.alight);
+    if (al) mk('落車 ' + stopZh(al.stop), 'end', al);
+  }
+  plan.axis.forEach((a, i) => {
+    if (panel.dots[i]) panel.dots[i].style.left = (axisPos(a) * 100).toFixed(2) + '%';
+  });
+  panel.labs.forEach(l => { l.el.style.left = (axisPos(l.a) * 100).toFixed(2) + '%'; });
+
+  // 車標
+  for (const el of [...track.querySelectorAll('.bk')]) el.remove();
+  const now = Date.now();
+  for (const b of live){
+    if (b.route !== leg.plan.route || b.dir !== leg.dir) continue;
+    const loc = CB.spanLocate(leg.plan.route, leg.dir, b, now, leg.plan);
+    if (!loc) continue;
+    const i = document.createElement('i');
+    i.className = 'bk';
+    i.style.left = ((state.axis === 'dist' ? loc.distPos : loc.timePos) * 100).toFixed(2) + '%';
+    i.title = `${stopZh(b.fromStop)} → ${stopZh(b.toStop)} · 本段 ${Math.round(loc.segMs/60000)} 分 · ${(loc.segDist/1000).toFixed(1)} km`;
+    track.append(i);
+  }
+}
+
+/* ── 在途车辆：到后面各站还差多少时间与里程 ─────────── */
+function paintTransit(panel, live, leg){
+  const now = Date.now();
+  const route = leg.plan.route, dir = leg.dir;
+  const seq = leg.plan.seq;
+  const board = leg.board.stop;
+  const boardIdx = seq.findIndex(s => s.stop === board);
+  const rows = [];
+
+  for (const b of live){
+    if (b.route !== route || b.dir !== dir) continue;
+    const toIdx = seq.findIndex(s => s.stop === b.toStop);
+    const fromIdx = seq.findIndex(s => s.stop === b.fromStop);
+    if (toIdx < 0) continue;
+    const passed = fromIdx > boardIdx;
+    const prog = CB.busProgress(route, dir, b, now);
+    const eta = passed ? null : CB.etaAtStop(route, dir, board, b.toEtaMs, true);
+    const left = eta ? Math.round((eta - now)/60000) : null;
+
+    // 下一站之後的幾站：還差多少時間、里程（下一站本身寫在路徑那一行，不重複）
+    const rest = [];
+    if (prog){
+      const last = leg.alight.idx;
+      for (let j = prog.segIdx + 2; j <= Math.min(seq.length - 1, last); j++){
+        const s = prog.segs[j-1];
+        if (!s) continue;
+        const remMs = Math.max(0, (s.cumMs + s.ms) - prog.cumMs);
+        const remM  = Math.max(0, (s.cumDist + s.distM) - prog.cumDist);
+        const e = CB.etaAtStop(route, dir, seq[j].stop, b.toEtaMs, true);
+        rest.push({
+          stop: seq[j].stop,
+          min: e ? Math.max(0, Math.round((e - now)/60000)) : Math.round(remMs/60000),
+          km: remM/1000,
+          real: !!e
+        });
+        if (rest.length >= 4) break;
+      }
+    }
+    rows.push({
+      from: stopZh(b.fromStop), to: stopZh(b.toStop),
+      nextMin: Math.max(0, Math.round((b.toEtaMs - now)/60000)),
+      left, passed, rest,
+      segMs: prog ? prog.segMs : 0, segKm: prog ? prog.segDist/1000 : 0
+    });
+  }
+  // 同一班车只留一行
+  const seen = new Set();
+  const uniq = [];
+  for (const r of rows){
+    const k = r.from + '|' + r.to + '|' + (r.left == null ? '' : r.left);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    uniq.push(r);
+  }
+  uniq.sort((a,b) => (a.left == null ? 999 : a.left) - (b.left == null ? 999 : b.left));
+
+  const key = uniq.map(r => r.from + r.to + r.left + r.rest.map(x => x.stop + x.min).join('')).join('|');
+  if (panel.trSig === key) return;
+  panel.trSig = key;
+  panel.transit.textContent = '';
+  if (!uniq.length){
+    const d = document.createElement('div');
+    d.innerHTML = '<u>暫時沒有在途班次</u>';
+    panel.transit.append(d);
+    return;
+  }
+  for (const r of uniq){
+    const row = document.createElement('div');
+    row.className = 'bus';
+    const inner = document.createElement('div');
+    inner.className = 'row';
+    const dot = document.createElement('i');
+    dot.className = 'dot' + (r.passed ? ' away' : '');
+    const path = document.createElement('span');
+    path.className = 'path';
+    path.textContent = r.from + ' → ' + r.to;
+    const seg = document.createElement('u');
+    seg.textContent = ' 本段 ' + Math.round(r.segMs/60000) + ' 分 ' + r.segKm.toFixed(1) + 'km'
+      + (r.passed ? '' : ' · 還有 ' + r.nextMin + ' 分到');
+    path.append(seg);
+    const eta = document.createElement('span');
+    eta.className = 'eta' + (r.left == null ? ' off' : '');
+    eta.textContent = r.passed ? '已过上車站'
+      : (r.left == null ? '—' : (r.left <= 0 ? '即將' : r.left + ' 分後到上車站'));
+    inner.append(dot, path, eta);
+    row.append(inner);
+
+    if (r.rest.length){
+      const br = document.createElement('div');
+      br.className = 'brace';
+      for (const x of r.rest){
+        const line = document.createElement('div');
+        const nm = document.createElement('b');
+        nm.textContent = stopZh(x.stop);
+        const gap = document.createElement('u');
+        gap.textContent = ' 剩 ' + x.min + ' 分 · ' + x.km.toFixed(1) + ' km';
+        const em = document.createElement('em');
+        em.textContent = x.real ? '' : '推算';
+        line.append(nm, gap, em);
+        br.append(line);
+      }
+      row.append(br);
+    }
+    panel.transit.append(row);
+  }
+}
+
+/* ── 沿線站點（中英，英文點陣） ─────────────────────── */
+function paintNear(panel, leg){
+  const plan = leg.plan;
+  const key = plan.axis.map(a => a.stop).join(',');
+  if (panel.nearSig === key) return;
+  panel.nearSig = key;
+  panel.near.textContent = '';
+  for (const a of plan.axis){
+    const li = document.createElement('li');
+    if (a.board) li.className = 'me';
+    const zh = document.createElement('span');
+    zh.className = 'zh';
+    zh.textContent = stopZh(a.stop);
+    const id = document.createElement('span');
+    id.className = 'id';
+    id.textContent = a.stop + ' · ' + (a.board ? '上車' : (a.alight ? '落車' : '第 ' + a.seq + ' 站'));
+    const en = document.createElement('span');
+    en.className = 'en';
+    li.append(zh, id, en);
+    panel.near.append(li);
+    wordInto(en, stopEn(a.stop), 's0', false);
+  }
+}
+
+/* ── 全線站點 ───────────────────────────────────────── */
+function paintAll(panel, leg){
+  const seq = leg.plan.seq;
+  const key = seq.map(s => s.stop).join(',') + '|' + leg.board.stop;
+  if (panel.olSig === key) return;
+  panel.olSig = key;
+  panel.ol.textContent = '';
+  for (const s of seq){
+    const li = document.createElement('li');
+    const inRide = s.stop === leg.board.stop || s.stop === leg.alight.stop;
+    if (inRide) li.className = 'me';
+    const n = document.createElement('b');
+    n.textContent = stopZh(s.stop);
+    const e = document.createElement('s');
+    e.textContent = stopEn(s.stop);
+    li.append(n, e);
+    panel.ol.append(li);
+  }
+}
+
+/* ── 主渲染 ─────────────────────────────────────────── */
+function renderPanel(panel, live){
+  const leg = resolveLeg(panel.preset);
+  panel.tag.textContent = leg ? (leg.dir === 'O' ? '該線去程' : '該線回程') : '未能配對';
+  if (!leg){
+    panel.em.textContent = '';
+    panel.note.textContent = '';
+    panel.hint.textContent = '這兩個站不在 ' + panel.preset.route + ' 的同一段車程上，請換一個組合。';
+    panel.track.textContent = '';
+    panel.transit.textContent = '';
+    panel.near.textContent = '';
+    panel.tbody.textContent = '';
+    return;
+  }
+  const seq = leg.plan.seq;
+  const idx = seq.findIndex(s => s.stop === leg.board.stop);
+  panel.em.textContent = `上車 ${stopZh(leg.board.stop)} · ${leg.board.stop} · 第 ${idx+1}/${seq.length} 站`;
+  const subs = [];
+  if (!leg.board.exact) subs.push(`${stopZh(panel.preset.from)} 改用 ${stopZh(leg.board.stop)}（${Math.round(leg.board.dist)} m）`);
+  if (!leg.alight.exact) subs.push(`${stopZh(panel.preset.to)} 改用 ${stopZh(leg.alight.stop)}（${Math.round(leg.alight.dist)} m）`);
+  panel.note.textContent = subs.join(' · ');
+
+  const r = BUSROUTES.routes[leg.plan.route + '|' + leg.dir];
+  const f = BUSROUTES.freqNow(leg.plan.route, leg.dir);
+  const last = BUSROUTES.lastBusIn(leg.plan.route, leg.dir);
+  panel.hint.innerHTML = r
+    ? `${r.from.zh} → ${r.to.zh} · 首班 <b>${r.first}</b> · 末班 <b>${r.last}</b>`
+      + ` · 現時班距 <b>${f ? f : '—'}</b> 分` + (last != null ? ` · 末班尚有 <b>${last}</b> 分` : '')
+    : '';
+
+  // 本站接下来几班
+  const list = (CB.cache.slots[`${leg.plan.route}|${leg.dir}|${leg.board.stop}`] || [])
+    .filter(s => s.etaMs > Date.now() - 60000)
+    .slice(0, 4);
+  const sig = list.map(s => s.etaMs + s.dest).join('|');
+  if (panel.sig !== sig){
+    panel.sig = sig;
+    panel.tbody.textContent = '';
+    if (!list.length){
+      const tr = document.createElement('tr');
+      const td = document.createElement('td');
+      td.colSpan = 3;
+      td.className = 'none';
+      td.textContent = '暫時沒有班次資料';
+      tr.append(td);
+      panel.tbody.append(tr);
+    }
+    for (const s of list){
+      const tr = document.createElement('tr');
+      const tdT = document.createElement('td');
+      const tw = document.createElement('span');
+      tdT.append(tw);
+      const tdD = document.createElement('td');
+      const zh = document.createElement('div');
+      zh.className = 'dest';
+      const en = document.createElement('span');
+      tdD.append(zh, en);
+      const tdM = document.createElement('td');
+      tdM.className = 'r';
+      const mw = document.createElement('span');
+      tdM.append(mw);
+      tr.append(tdT, tdD, tdM);
+      panel.tbody.append(tr);
+      s._tw = tw; s._zh = zh; s._en = en; s._mw = mw;
+    }
+  }
+  for (const s of list){
+    if (!s._tw) continue;
+    wordInto(s._tw, HK_MIN.format(new Date(s.etaMs)), 's2');
+    s._zh.textContent = s.dest || '';
+    wordInto(s._en, s.destEn || '', 's1');
+    const left = (s.etaMs - Date.now())/60000;
+    flapValue(s._mw, left <= 0 ? '即將' : (left < 1 ? '<1' : String(Math.round(left))), 's3');
+  }
+
+  paintTrack(panel, live, leg);
+  paintNear(panel, leg);
+  paintTransit(panel, live, leg);
+  paintAll(panel, leg);
+}
+
+function renderHead(){
+  const p = panels.go.preset, q = panels.back.preset;
+  wordInto(routeEl, p.route, 's3');
+  ttlEl.textContent = stopZh(p.from) + ' → ' + stopZh(p.to);
+  ttlEl.title = '去程 ' + stopZh(p.from) + ' → ' + stopZh(p.to)
+    + '　·　返程 ' + stopZh(q.from) + ' → ' + stopZh(q.to);
+  ttlenEl.textContent = '';
+  const seen = new Set();
+  for (const x of [p, q]){
+    for (const id of [x.from, x.to]){
+      if (seen.has(id)) continue;
+      seen.add(id);
+      const line = document.createElement('div');
+      ttlenEl.append(line);
+      wordInto(line, stopEn(id), 's0', false);
+    }
+  }
+  document.title = '城巴 ' + p.route + ' · 實時班次';
+}
+function render(){
+  renderClock();
+  renderHead();
+  const live = CB.buses(Date.now());
+  for (const k in panels) renderPanel(panels[k], live);
+  const t = new Date(CB.cache.meta.updatedAt || Date.now());
+  const p = n => String(n).padStart(2,'0');
+  stampEl.textContent = CB.cache.meta.updatedAt
+    ? `快照 ${p(t.getHours())}:${p(t.getMinutes())} · 緩存 ${(CB.cacheSize/1024).toFixed(1)} KB`
+    : '尚未取得資料';
+}
+function renderClock(){
+  wordInto(clockEl, HK_SEC.format(new Date()), 's2', false);
+}
+
+/* ── 启动 ───────────────────────────────────────────── */
+async function boot(){
+  loadPick();
+  for (const k in panels){
+    fillRoutes(panels[k]);
+    panels[k].bTime.classList.toggle('on', state.axis === 'time');
+    panels[k].bDist.classList.toggle('on', state.axis === 'dist');
+  }
+  CB.setScope([state.presets.go.route, state.presets.back.route]);
+  try { await CB.ensureIndex(); } catch (e) { console.warn('站序取數失敗', e.message); }
+  for (const k in panels) fillStops(panels[k]);
+  CB.setOrigin(CB.bboxOf());
+  CB.buildPaths();
+  render();
+  try { await CB.pull(); } catch (e) { console.warn('取數失敗', e.message); }
+  CB.setOrigin(CB.bboxOf());
+  CB.buildPaths();
+  render();
+  setInterval(async () => {
+    try { await CB.pull(); } catch (e) { console.warn('取數失敗', e.message); }
+    render();
+  }, 30000);
+  setInterval(render, 1000);
+}
+
+document.getElementById('refresh').onclick = async () => { await CB.pull(); render(); };
+document.getElementById('export').onclick = () => {
+  const snap = {
+    at: new Date().toISOString(),
+    presets: state.presets,
+    stops: CB.cache.index.stops,
+    routes: CB.cache.index.routes,
+    slots: CB.cache.slots,
+    buses: CB.buses()
+  };
+  const blob = new Blob([JSON.stringify(snap, null, 2)], {type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `citybus-${new Date().toISOString().replace(/[:.]/g,'-')}.json`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+};
+boot();
+</script>
+</body>
+</html>
