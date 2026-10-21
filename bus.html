@@ -22,7 +22,11 @@
 
   /* ── 頂部發車牌 ─────────────────────────────────────── */
   .head{display:flex;align-items:flex-start;gap:16px;padding:16px 20px;
-    background:linear-gradient(#241d13,#16120c);border-bottom:1px solid #000}
+    background:linear-gradient(#241d13,#16120c)}
+  /* 英文站名獨立一條帶：擱在標題欄裡面會被發車牌與時鐘擠到只剩兩百多像素，
+     點陣縮到 1px 才塞得下，兩行還會一粗一細。 */
+  .enband{display:flex;flex-direction:column;gap:6px;padding:2px 20px 13px;
+    background:linear-gradient(#16120c,#1d1811);border-bottom:1px solid #000}
   .badge{flex:none;display:flex;align-items:center;gap:9px;padding:8px 13px 8px 11px;border-radius:8px;
     background:#0d0b08;border:1px solid #3a2f1c;box-shadow:0 1px 0 rgba(255,176,0,.10) inset}
   .badge em{font-style:normal;font-size:12px;letter-spacing:.14em;color:#8a5f04}
@@ -30,22 +34,26 @@
   .title h1{margin:0;font-size:19px;letter-spacing:.04em;color:var(--text);font-weight:600;line-height:1.35}
   .title h1 .seg{white-space:nowrap}          /* 站名不拆開，只在箭頭處斷行 */
   .title h1 .arrow{color:var(--amber-dim);padding:0 3px}
-  .title .en{margin-top:8px;display:flex;flex-direction:column;gap:5px;align-items:flex-start}
   .clock{flex:none}
-
   /* 点阵：一个字符 5×7 个点，字模表只写一次，所有格都复用 */
   .word{display:inline-flex;gap:var(--cg,4px);vertical-align:middle}
   .word.sn{--d:1.5px;--cg:0.7px}
+  .word.sx{--d:1.3px;--cg:0.6px}
+  .word.sw{--d:1px;--cg:0.5px}
   .word.s0{--d:2px;--cg:1px}
   .word.s1{--d:3px;--cg:2px}
   .word.s2{--d:5px;--cg:4px}
   .word.s3{--d:7px;--cg:5px}
   .dots{display:inline-grid;grid-template-columns:repeat(5,var(--d));grid-template-rows:repeat(7,var(--d));
     gap:1px}
+  .word.sx .dots{gap:.6px}
+  .word.sw .dots{gap:.4px}
   .dots i{display:block;border-radius:50%;background:#241c0d}
   .dots i.on{background:var(--amber);box-shadow:0 0 7px rgba(255,176,0,.6)}
   .word.flash .dots i.on{animation:led .4s ease-out}
   @keyframes led{from{opacity:.15;box-shadow:0 0 2px rgba(255,176,0,.2)}}
+  /* 標題的英文站名：獨佔一行，用塊級 flex 才不會被行內基線往上頂 */
+  .enband .enline{display:flex;max-width:100%}
 
   /* ── 收藏：去程 / 返程 ───────────────────────────────── */
   .leg{padding:0 0 20px;border-bottom:1px solid #000}
@@ -172,8 +180,7 @@
     border-radius:6px;padding:5px 12px;font:inherit;font-size:11px;letter-spacing:.1em;cursor:pointer}
   .foot button + button{margin-left:8px}
   .foot button:hover{background:#312718}
-  .foot .link{color:#8a5f04;text-decoration:none;letter-spacing:.06em;font-size:10.5px}
-  .foot .link:hover{color:var(--amber)}
+  .foot .note{color:#6b5a35;font-size:10.5px;letter-spacing:.05em;flex:1 0 100%;order:9}
 
   /* ── 窄屏（手機） ───────────────────────────────────── */
   @media (max-width: 560px){
@@ -184,7 +191,7 @@
     .clock{order:2;margin-left:auto}
     .title{order:3;flex:1 0 100%}
     .title h1{font-size:16px;line-height:1.45;word-break:keep-all}
-    .title .en{gap:4px;margin-top:6px}
+    .enband{padding:2px 13px 11px;gap:4px}
     .leg-head{padding:12px 13px 0;gap:7px}
     .leg-head b{font-size:15px}
     .leg-head em{margin-left:0;flex:1 0 100%;order:6}
@@ -221,19 +228,19 @@
       <div class="badge"><em>城巴</em><div id="route"></div></div>
       <div class="title">
         <h1 id="ttl">—</h1>
-        <div class="en" id="ttlen"></div>
       </div>
       <div class="clock" id="clock"></div>
     </div>
+    <div class="enband" id="ttlen"></div>
 
     <div id="legs"></div>
 
     <div class="foot">
       <span>城巴 Citybus · 運輸署 DATA.GOV.HK 實時到站 · 每 30 秒拉一次全量快照</span>
       <span id="stamp"></span>
-      <a class="link" href="./citybus_gis.html">3D GIS 版 →</a>
       <button id="refresh" type="button">立即更新</button>
       <button id="export" type="button">匯出快照</button>
+      <span class="note">車輛位置由到站時間推算，非實時定位 · 逐段里程用 OSM 路網</span>
     </div>
   </div>
 </div>
@@ -374,8 +381,9 @@ function wordInto(host, text, scale, flash){
   let w = host._w;
   if (!w || w.n !== chars.length || w.scale !== scale){
     /* 保留元素原有的 class：直接覆寫 className 會把 .clock 之類的選擇器洗掉，
-       窄屏的媒體查詢就匹配不到（時鐘的排版順序會亂掉）。 */
-    if (!host.dataset.base) host.dataset.base = host.className || '';
+       窄屏的媒體查詢就匹配不到（時鐘的排版順序會亂掉）。
+       用「是否設定過」判斷，不是「有沒有值」——空 class 的元素會被重複抓成 'word s1 word s1'。 */
+    if (host.dataset.base === undefined) host.dataset.base = host.className || '';
     host.textContent = '';
     host.className = (host.dataset.base + ' word ' + scale).trim();
     w = {n:chars.length, scale, dots:[], text:''};
@@ -918,6 +926,31 @@ function renderPanel(panel, live){
   paintAll(panel, leg);
 }
 
+/* ── 標題的英文站名：固定格寬的點陣 ──
+   點陣格寬是固定的，名字長就放不下（"FU TAI ESTATE, CASTLE PEAK ROAD" 29 個字）。
+   縮放一次定檔：最長的那個名字放得下就行，全部用同一檔，兩行才不會一粗一細。 */
+const EN_FITS = {s0: ['s0','sn','sx','sw'], sn: ['sn','sx','sw'], sx: ['sx','sw'], sw: ['sw']};
+function pickEnScale(names){
+  const chain = EN_FITS[SC.en()] || [SC.en()];
+  const cs = getComputedStyle(ttlenEl);
+  /* 可用寬度要算內容區：clientWidth 含內距，帶子本身有 13~20px 內距 */
+  const avail = (ttlenEl.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight)) || 0;
+  const probe = document.createElement('div');
+  probe.className = 'enline';
+  probe.style.cssText = 'position:absolute;left:-9999px;top:0;visibility:hidden';
+  ttlenEl.append(probe);
+  let best = chain[chain.length-1];
+  for (const s of chain){
+    let ok = true;
+    for (const nm of names){
+      wordInto(probe, nm, s, false);
+      if (avail && probe.scrollWidth > avail) { ok = false; break; }
+    }
+    if (ok) { best = s; break; }
+  }
+  probe.remove();
+  return best;
+}
 function renderHead(){
   const p = panels.go.preset, q = panels.back.preset;
   wordInto(routeEl, p.route, SC.route());
@@ -930,14 +963,20 @@ function renderHead(){
     + '　·　返程 ' + stopZh(q.from) + ' → ' + stopZh(q.to);
   ttlenEl.textContent = '';
   const seen = new Set();
+  const names = [];
   for (const x of [p, q]){
     for (const id of [x.from, x.to]){
       if (seen.has(id)) continue;
       seen.add(id);
-      const line = document.createElement('div');
-      ttlenEl.append(line);
-      wordInto(line, stopEn(id), SC.en(), false);
+      names.push(stopEn(id));
     }
+  }
+  const enScale = pickEnScale(names);
+  for (const nm of names){
+    const line = document.createElement('div');
+    line.className = 'enline';
+    ttlenEl.append(line);
+    wordInto(line, nm, enScale, false);
   }
   document.title = '城巴 ' + p.route + ' · 實時班次';
 }

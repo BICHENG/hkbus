@@ -1,0 +1,410 @@
+<!doctype html>
+<html lang="zh-HK">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>預渲染工作台 · 城巴線路影像</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cesium@1.133.0/Build/Cesium/Widgets/widgets.css">
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#05070a}
+  #stage{position:fixed;inset:0}
+  #stage canvas{display:block}
+  #err{position:fixed;left:8px;top:8px;z-index:9;color:#d8573c;font:12px ui-monospace,Consolas,monospace;
+    white-space:pre-wrap;max-width:90%}
+  #banner{position:fixed;left:0;right:0;top:0;z-index:8;padding:7px 12px;background:rgba(10,9,7,.92);
+    color:#ffb000;font:11px/1.5 ui-monospace,Consolas,monospace;letter-spacing:.06em}
+  #banner b{color:#f0e6d2;font-weight:400}
+</style>
+<script>window.CESIUM_BASE_URL='https://cdn.jsdelivr.net/npm/cesium@1.133.0/Build/Cesium/';</script>
+<script src="https://cdn.jsdelivr.net/npm/cesium@1.133.0/Build/Cesium/Cesium.js"></script>
+</head>
+<body>
+<div id="stage"></div>
+<div id="err"></div>
+<div id="banner">預渲染<b>工作台</b> — 成品是渲染出來的圖與短片，這一頁由 render-rigs.js 驅動，不是給人看的頁面。</div>
+<script src="../busroutes.js"></script>
+<script src="../geometry.js"></script>
+<script>
+/* 預渲染工作台：把「跟車相機」的機位變成可枚舉的參數，
+   並在頁內算每幀的畫面指標（賽馬用）。
+   這是製作工具，不是給人看的頁面；成品是預渲染出來的圖與短片。 */
+(function () {
+  'use strict';
+  const viewer = new Cesium.Viewer('stage', {
+    baseLayer: false, animation: false, timeline: false, baseLayerPicker: false,
+    geocoder: false, homeButton: false, sceneModePicker: false, navigationHelpButton: false,
+    infoBox: false, selectionIndicator: false, shouldAnimate: false,
+    contextOptions: { webgl: { preserveDrawingBuffer: true } }
+  });
+  const scene = viewer.scene;
+  scene.globe.baseColor = Cesium.Color.fromCssColorString('#05070a');
+  scene.backgroundColor = Cesium.Color.fromCssColorString('#05070a');
+  scene.skyAtmosphere.show = false;
+  scene.globe.showGroundAtmosphere = false;
+  scene.sun.show = false; scene.moon.show = false; scene.fog.enabled = false;
+  scene.terrainProvider = new Cesium.EllipsoidTerrainProvider();
+  scene.globe.depthTestAgainstTerrain = false;
+
+  const LANDSD = 'https://data.map.gov.hk/api/3d-data/meshmodel/WGS84/tileset.json';
+  const LANDSD_KEY = 'ad5940a63bd344c48b0351ef1c7a905e';
+  const KMD_KEY = '454c6d4b534c40fbb29b2a0845e32a55';
+  const KMD = 'https://api.hkmapservice.gov.hk/osm/xyz/worldimagery/WGS84/tile/{z}/{x}/{y}.png?key=' + KMD_KEY;
+  const COLOR = { B3A: '#ffb000', B3X: '#49d2ff', B3: '#ff6a4d' };
+
+  viewer.imageryLayers.addImageryProvider(new Cesium.UrlTemplateImageryProvider({
+    url: KMD, maximumLevel: 19, credit: '影像 © 香港地政總署 KMD / LandsD'
+  }));
+
+  /* 站名座標：來自 route-stop + stop 介面（渲染時先抓一次） */
+  const API = 'https://rt.data.gov.hk/v2/transport/citybus';
+  const stops = {};
+  let tileset = null;
+
+  function busImage(route) {
+    const c = document.createElement('canvas');
+    c.width = 96; c.height = 48;
+    const g = c.getContext('2d');
+    g.shadowColor = COLOR[route]; g.shadowBlur = 14;
+    g.fillStyle = COLOR[route];
+    g.beginPath(); g.roundRect ? g.roundRect(6, 10, 84, 24, 6) : g.rect(6, 10, 84, 24); g.fill();
+    g.shadowBlur = 0;
+    g.lineWidth = 3; g.strokeStyle = 'rgba(6,8,12,.95)';
+    g.beginPath(); g.roundRect ? g.roundRect(6, 10, 84, 24, 6) : g.rect(6, 10, 84, 24); g.stroke();
+    g.fillStyle = 'rgba(8,10,14,.85)'; g.fillRect(13, 14, 60, 9);
+    g.fillStyle = '#fff4d2'; g.beginPath(); g.arc(86, 19, 3.2, 0, 6.3); g.fill();
+    g.fillStyle = '#0a0c10'; g.beginPath(); g.arc(23, 36, 6, 0, 6.3); g.fill();
+    g.beginPath(); g.arc(72, 36, 6, 0, 6.3); g.fill();
+    g.fillStyle = '#0a0c10'; g.font = 'bold 13px monospace';
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillText(route, 45, 29.5);
+    return c;
+  }
+
+  /* ── 路徑：把 geometry 的每段點攤平成一條，帶里程 ── */
+  let PATH = null;        // {pts:[{lon,lat,d}], total, stops:[{stop, d}]}
+  let busBB = null, busColl = null, labelColl = null, linePrims = [];
+
+  function distM(a, b) {
+    const aLon = a.lon !== undefined ? a.lon : a[0], aLat = a.lat !== undefined ? a.lat : a[1];
+    const bLon = b.lon !== undefined ? b.lon : b[0], bLat = b.lat !== undefined ? b.lat : b[1];
+    const rad = d => d * Math.PI/180;
+    const dx = (bLon-aLon) * 111320 * Math.cos(rad((aLat+bLat)/2));
+    const dy = (bLat-aLat) * 111320;
+    return Math.sqrt(dx*dx + dy*dy);
+  }
+  function distTo(pts, p) {
+    let best = 0, bd = Infinity;
+    for (let i = 0; i < pts.length; i++) {
+      const d = distM(pts[i], p);
+      if (d < bd) { bd = d; best = i; }
+    }
+    return pts[best] ? pts[best].d : 0;
+  }
+  function buildPath(route, dir) {
+    const g = GEO.routes[route + '|' + dir];
+    if (!g) return null;
+    const pts = [];
+    let d = 0;
+    for (const leg of g.legs) {
+      for (let i = 0; i < leg.pts.length; i++) {
+        const p = leg.pts[i];
+        if (pts.length) d += distM(pts[pts.length-1], p);   // 跨段也要接上
+        pts.push({lon: p[0], lat: p[1], d: d});
+      }
+    }
+    const stops = [];
+    for (const leg of g.legs) {
+      stops.push({stop: leg.from, d: distTo(pts, leg.pts[0])});
+      stops.push({stop: leg.to, d: distTo(pts, leg.pts[leg.pts.length-1])});
+    }
+    // 同站去重（相鄰重複的保留最後一個）
+    const uniq = [];
+    for (const s of stops) {
+      if (uniq.length && uniq[uniq.length-1].stop === s.stop) uniq[uniq.length-1] = s;
+      else uniq.push(s);
+    }
+    return {pts: pts, total: d, stops: uniq, route: route, dir: dir};
+  }
+  function pointAt(d) {
+    const p = PATH.pts;
+    let lo = 0, hi = p.length - 1;
+    while (lo < hi) { const m = (lo + hi) >> 1; if (p[m].d <= d) lo = m + 1; else hi = m; }
+    const i = Math.max(1, lo);
+    const a = p[i-1], b = p[Math.min(i, p.length-1)];
+    const seg = (b.d - a.d) || 1;
+    const t = Math.max(0, Math.min(1, (d - a.d) / seg));
+    return {lon: a.lon + (b.lon-a.lon)*t, lat: a.lat + (b.lat-a.lat)*t,
+            head: Math.atan2(b.lon-a.lon, b.lat-a.lat)};
+  }
+
+  /* ── 機位：跟車相機 ──
+     相機 = 路徑上「車輛位置往後 behind 米」的一點，抬高 height 米、橫移 lateral 米；
+     視線 = 路徑切線往前的方向，向下俯 pitch 度。 */
+  function setRig(rig) {
+    if (!PATH) return {__err: 'PATH 未建立'};
+    const d = Math.max(0, Math.min(PATH.total, rig.s));
+    PATH.carD = d;
+    const car = pointAt(d);
+    const camD = Math.max(0, d - (rig.behind || 0));
+    const cam = pointAt(camD);
+    // 橫移：垂直於行駛方向（east 分量 cos(head)，north 分量 -sin(head)）
+    const nx = Math.cos(car.head), ny = -Math.sin(car.head);
+    const camLon = cam.lon + nx * (rig.lateral || 0) / (111320 * Math.cos(cam.lat * Math.PI/180));
+    const camLat = cam.lat + ny * (rig.lateral || 0) / 111320;
+    const camH = (rig.height || 80);
+    // 視線：用 Cesium 的 heading/pitch（以目的地為原點的當地 ENU 框架），
+    // 不自己換算目標點——手工換算 ECEF 在這個版本裡不夠穩。
+    // heading：0 = 正北、順時針為正，正好是路徑切線的方位角。
+    // pitch：負值 = 往下看。
+    const heading = car.head;
+    const pitch = (rig.pitch != null ? rig.pitch : -25) * Math.PI / 180;
+    const camPos = Cesium.Cartesian3.fromDegrees(camLon, camLat, camH);
+    viewer.camera.setView({
+      destination: camPos,
+      orientation: {heading: heading, pitch: pitch, roll: 0}
+    });
+    if (rig.fov) { viewer.camera.frustum.fov = Cesium.Math.toRadians(rig.fov); }
+    // 車標
+    if (busBB) {
+      busBB.position = Cesium.Cartesian3.fromDegrees(car.lon, car.lat, 6);
+      busBB.rotation = Math.PI/2 - car.head;
+    }
+    return {car: {lon: car.lon, lat: car.lat, d: car.d, head: car.head},
+            cam: {lon: camLon, lat: camLat, h: camH},
+            camPos: [camPos.x, camPos.y, camPos.z],
+            actual: [viewer.camera.positionWC.x, viewer.camera.positionWC.y, viewer.camera.positionWC.z]};
+  }
+
+  /* 相機實際狀態（診斷用） */
+  function camInfo() {
+    const c = viewer.camera;
+    return {
+      pos: [c.positionWC.x, c.positionWC.y, c.positionWC.z],
+      dir: [c.directionWC.x, c.directionWC.y, c.directionWC.z],
+      fov: c.frustum.fov,
+      canvas: [scene.canvas.clientWidth, scene.canvas.clientHeight],
+      hasPath: !!PATH,
+      total: PATH ? PATH.total : 0
+    };
+  }
+
+  /* ── 畫面指標（賽馬用） ──
+     投影要先排除「在相機背後」的點，否則 worldToWindowCoordinates 會給出假座標。 */
+  function project(p) {
+    const W = scene.canvas.clientWidth, H = scene.canvas.clientHeight;
+    const c = Cesium.Cartesian3.fromDegrees(p.lon, p.lat, 0);
+    const camPos = viewer.camera.positionWC, camDir = viewer.camera.directionWC;
+    const depth = (c.x-camPos.x)*camDir.x + (c.y-camPos.y)*camDir.y + (c.z-camPos.z)*camDir.z;
+    if (!(depth > 0)) return null;
+    const w = Cesium.SceneTransforms.worldToWindowCoordinates(scene, c);
+    if (!w || !isFinite(w.x) || !isFinite(w.y)) return null;
+    if (w.x < 0 || w.x > W || w.y < 0 || w.y > H) return null;
+    return {x: w.x, y: w.y, depth: depth};
+  }
+  function depthOf(c) {
+    const camPos = viewer.camera.positionWC, camDir = viewer.camera.directionWC;
+    return (c.x-camPos.x)*camDir.x + (c.y-camPos.y)*camDir.y + (c.z-camPos.z)*camDir.z;
+  }
+  function score() {
+    const W = scene.canvas.clientWidth, H = scene.canvas.clientHeight;
+    // ① 路線可見度：整條路有多少點在畫面上且在相機前方
+    let inView = 0;
+    for (const p of PATH.pts) if (project(p)) inView++;
+    const routeVisible = PATH.pts.length ? inView / PATH.pts.length : 0;
+    // ② 前方可見：接下來 800 公尺的路有多少點在畫面上（這才叫「交代路線」）
+    const carD = PATH.carD != null ? PATH.carD : 0;
+    let ahead = 0, aheadN = 0;
+    for (const p of PATH.pts) {
+      if (p.d < carD || p.d > carD + 800) continue;
+      aheadN++;
+      if (project(p)) ahead++;
+    }
+    const aheadVisible = aheadN ? ahead / aheadN : 0;
+    // ③ 車標
+    let busOn = false, busPx = 0;
+    if (busBB && busBB.show) {
+      const c = busBB.position;
+      const ww = Cesium.SceneTransforms.worldToWindowCoordinates(scene, c);
+      if (depthOf(c) > 0 && ww && ww.x >= 0 && ww.x <= W && ww.y >= 0 && ww.y <= H) {
+        busOn = true;
+        busPx = busBB.scale * 96;
+      }
+    }
+    // ④ 站名：畫面內有幾個、互相重疊幾對
+    let labels = 0, overlap = 0;
+    const boxes = [];
+    if (labelColl) {
+      for (let i = 0; i < labelColl.length; i++) {
+        const lb = labelColl.get(i);
+        if (!lb.show) continue;
+        const c = lb.position;
+        if (!(depthOf(c) > 0)) continue;
+        const w = Cesium.SceneTransforms.worldToWindowCoordinates(scene, c);
+        if (!w || w.x < 0 || w.x > W || w.y < 0 || w.y > H) continue;
+        labels++;
+        const tw = (lb.text ? lb.text.length : 4) * 13 + 12;   // 中文字寬約 13px
+        const box = {x: w.x + 10, y: w.y - 10, w: tw, h: 18};
+        for (const b of boxes) {
+          if (Math.abs(b.x - box.x) < (b.w + box.w)/2 && Math.abs(b.y - box.y) < 16) { overlap++; break; }
+        }
+        boxes.push(box);
+      }
+    }
+    // ⑤ 環境：攝影模型的瓦片數
+    const tiles = tileset ? (tileset.statistics.selected || tileset.statistics.numberOfTilesTotal || 0) : 0;
+    return {
+      routeVisible: routeVisible,
+      aheadVisible: aheadVisible,
+      busOn: busOn, busPx: Math.round(busPx),
+      labels: labels, overlap: overlap,
+      tiles: tiles
+    };
+  }
+
+  /* ── 準備：站名、線、車標 ── */
+  async function prepare(route, dir) {
+    // 站名座標
+    const j = await (await fetch(`${API}/route-stop/ctb/${route}/${dir === 'O' ? 'outbound' : 'inbound'}`)).json();
+    const seq = j.data.filter(s => s.dir === (dir === 'O' ? 'O' : 'I')).sort((a,b) => a.seq - b.seq);
+    for (const s of seq) {
+      if (stops[s.stop]) continue;
+      try {
+        const t = await (await fetch(`${API}/stop/${s.stop}`)).json();
+        const d = Array.isArray(t.data) ? t.data[0] : t.data;
+        stops[s.stop] = {lat: +d.lat, lon: +d.long, zh: d.name_tc};
+      } catch (e) {}
+    }
+    PATH = buildPath(route, dir);
+    if (!PATH) throw new Error('沒有這條線的幾何');
+
+    // 線
+    for (const p of linePrims) scene.primitives.remove(p);
+    linePrims = [];
+    const g = GEO.routes[route + '|' + dir];
+    const pos = [];
+    for (const leg of g.legs) for (const p of leg.pts) {
+      const c = Cesium.Cartesian3.fromDegrees(p[0], p[1], 4);
+      const last = pos[pos.length-1];
+      if (!last || Math.abs(last.x-c.x) > 1e-4 || Math.abs(last.y-c.y) > 1e-4) pos.push(c);
+    }
+    if (pos.length > 1) {
+      const base = Cesium.Color.fromCssColorString(COLOR[route]);
+      const mat = Cesium.Material.fromType('PolylineArrow', {color: new Cesium.Color(base.red, base.green, base.blue, 0.95)});
+      linePrims.push(scene.primitives.add(new Cesium.Primitive({
+        geometryInstances: new Cesium.GeometryInstance({
+          geometry: new Cesium.PolylineGeometry({positions: pos, width: 6, material: mat, arcType: Cesium.ArcType.GEODESIC})
+        }),
+        appearance: new Cesium.PolylineMaterialAppearance({material: mat, translucent: true}),
+        asynchronous: false
+      })));
+    }
+    // 站名
+    if (labelColl) scene.primitives.remove(labelColl);
+    labelColl = scene.primitives.add(new Cesium.LabelCollection());
+    for (const s of PATH.stops) {
+      const st = stops[s.stop];
+      if (!st) continue;
+      labelColl.add({
+        position: Cesium.Cartesian3.fromDegrees(st.lon, st.lat, 10),
+        text: st.zh || s.stop,
+        font: '13px "Microsoft JhengHei","Noto Sans HK",sans-serif',
+        fillColor: Cesium.Color.WHITE, outlineColor: Cesium.Color.BLACK, outlineWidth: 3,
+        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+        horizontalOrigin: Cesium.HorizontalOrigin.LEFT, verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+        pixelOffset: new Cesium.Cartesian2(10, -10),
+        scale: 1.0, disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 40000)
+      });
+    }
+    // 車標（移除整個集合，不是單一 billboard）
+    if (busColl) scene.primitives.remove(busColl);
+    busColl = scene.primitives.add(new Cesium.BillboardCollection({scene: scene}));
+    busBB = busColl.add({
+      image: busImage(route), position: Cesium.Cartesian3.fromDegrees(0,0,6),
+      scale: 1.2, verticalOrigin: Cesium.VerticalOrigin.CENTER,
+      disableDepthTestDistance: Number.POSITIVE_INFINITY
+    });
+  }
+
+  async function loadTiles(sse) {
+    if (tileset) return;
+    const resource = new Cesium.Resource({url: LANDSD, queryParameters: {key: LANDSD_KEY}});
+    tileset = await Cesium.Cesium3DTileset.fromUrl(resource, {
+      maximumScreenSpaceError: sse || 8, maximumSimultaneousTileLoads: 8, cacheBytes: 536870912
+    });
+    scene.primitives.add(tileset);
+  }
+
+  /* 對外介面（給 CDP 驅動呼叫） */
+  window.RIG = {
+    async init(route, dir, withTiles, sse) {
+      await prepare(route, dir);
+      if (withTiles !== false) await loadTiles(sse);
+      return {total: PATH.total, stops: PATH.stops.length, frames: PATH.pts.length,
+              tiles: !!tileset};
+    },
+    setRig(rig) { return setRig(rig); },
+    camInfo: camInfo,
+    setSSE: function (v) { if (tileset) { tileset.maximumScreenSpaceError = v; return true; } return false; },
+    pending: function () {
+      if (!tileset) return 0;
+      const st = tileset.statistics || {};
+      return (st.numberOfPendingRequests || 0) + (st.numberOfTilesProcessing || 0);
+    },
+    score: score,
+    probe: function () {
+      const W = scene.canvas.clientWidth, H = scene.canvas.clientHeight;
+      const cam = viewer.camera;
+      const bus = busBB ? busBB.position : null;
+      const carP = PATH && PATH.carD != null ? pointAt(PATH.carD) : null;
+      const wp = (c) => {
+        if (!c) return null;
+        const w = Cesium.SceneTransforms.worldToWindowCoordinates(scene, c);
+        return {w: w ? [Math.round(w.x), Math.round(w.y)] : null, depth: Math.round(depthOf(c))};
+      };
+      // 前方 100/300/600 公尺的路點
+      const ahead = [];
+      if (PATH) for (const dd of [100, 300, 600]) {
+        const p = pointAt(Math.min(PATH.total, (PATH.carD||0) + dd));
+        ahead.push({d: dd, ...wp(Cesium.Cartesian3.fromDegrees(p.lon, p.lat, 0))});
+      }
+      return {canvas: [W, H], fov: cam.frustum.fov,
+              camPos: [cam.positionWC.x, cam.positionWC.y, cam.positionWC.z],
+              camDir: [cam.directionWC.x, cam.directionWC.y, cam.directionWC.z],
+              bus: wp(bus), car: wp(carP ? Cesium.Cartesian3.fromDegrees(carP.lon, carP.lat, 6) : null),
+              ahead: ahead, head: carP ? carP.head : null,
+              imagery: viewer.imageryLayers.length,
+              layers: (function () {
+                const out = [];
+                for (let i = 0; i < viewer.imageryLayers.length; i++) {
+                  const l = viewer.imageryLayers.get(i);
+                  out.push({show: l.show, ready: l.ready, alpha: l.alpha,
+                            provider: l.imageryProvider && l.imageryProvider.constructor.name,
+                            level: l.imageryProvider && l.imageryProvider.maximumLevel});
+                }
+                return out;
+              })(),
+              globeTilesLoaded: scene.globe.tilesLoaded,
+              baseColor: [scene.globe.baseColor.r, scene.globe.baseColor.g, scene.globe.baseColor.b],
+              tilesToRender: (function () {
+                try {
+                  const s = scene.globe._surface;
+                  return s && s._tilesToRender && s._tilesToRender.length ? s._tilesToRender.length : 0;
+                } catch (e) { return -1; }
+              })()};
+    },
+    ready: function () { return scene.globe.tilesLoaded && (!tileset || tileset.tilesLoaded); },
+    stats: function () { return tileset ? tileset.statistics : null; },
+    pathPoints: function () { return PATH.pts; }
+  };
+  document.getElementById('err').textContent = '';
+  // 開這頁的人多半是誤點：把它說清楚
+  if (!/[?&]driver=1/.test(location.search)) {
+    document.getElementById('banner').innerHTML =
+      '預渲染<b>工作台</b> — 成品是渲染出來的圖與短片，這一頁由 render-rigs.js 驅動，不是給人看的頁面。';
+  }
+  window.__RIG_READY = true;
+})();
+</script>
+</body>
+</html>

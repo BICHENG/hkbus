@@ -7,13 +7,26 @@
 <meta http-equiv="refresh" content="0; url=./bus.html">
 <link rel="canonical" href="./bus.html">
 <style>
-  body{margin:0;background:#0a0907;color:#f0e6d2;height:100vh;display:flex;align-items:center;
-    justify-content:center;font:14px/1.6 ui-monospace,"SF Mono",Menlo,Consolas,"Noto Sans HK","Microsoft JhengHei",monospace}
+  body{margin:0;background:#0a0907;color:#f0e6d2;min-height:100vh;display:flex;align-items:center;
+    justify-content:center;font:14px/1.7 ui-monospace,"SF Mono",Menlo,Consolas,"Noto Sans HK","Microsoft JhengHei",monospace}
+  .box{max-width:560px;padding:32px 26px}
+  h1{font-size:17px;font-weight:600;letter-spacing:.06em;margin:0 0 6px;color:#ffb000}
+  p{margin:9px 0;color:#6b5a35;font-size:12.5px}
   a{color:#ffb000}
+  ul{margin:9px 0 0;padding-left:20px;color:#6b5a35;font-size:12.5px}
+  li{margin:4px 0}
 </style>
 </head>
 <body>
-<p>前往 <a href="./bus.html">城巴 B3 系列實時班次屏</a> …<br>
-<a href="./citybus_gis.html">3D GIS 版</a></p>
+<div class="box">
+  <h1>城巴 B3 / B3A / B3X · 實時班次屏</h1>
+  <p>正在前往 <a href="./bus.html">班次屏</a> …</p>
+  <ul>
+    <li>三條線六個方向，任選上車點與下車點</li>
+    <li>下一班、在途車輛、沿線進度（時間軸或里程軸）</li>
+    <li>車輛位置由到站時間推算，非實時定位</li>
+  </ul>
+  <p>原始碼與說明：<a href="https://github.com/BICHENG/hkbus">github.com/BICHENG/hkbus</a></p>
+</div>
 </body>
 </html>
