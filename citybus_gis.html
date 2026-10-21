@@ -837,7 +837,8 @@
         busesEl.append(dirHead);
 
         if (!sub.length) {
-          busesEl.append(el('div', 'none', '暫時沒有在途班次'));
+          /* 整條線都沒有車時才寫一行提示（組標題已經寫了「0 班在途」，不必重複） */
+          if (!mine.length) busesEl.append(el('div', 'none', '暫時沒有在途班次'));
           continue;
         }
         for (const b of sub) {
