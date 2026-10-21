@@ -330,25 +330,31 @@
         const g = GEO.routes[key];
         if (!g) continue;
         const base = Cesium.Color.fromCssColorString(ROUTE_COLOR[route]);
-        const color = new Cesium.Color(base.red, base.green, base.blue, dir === 'O' ? 0.95 : 0.55);
+        const color = new Cesium.Color(base.red, base.green, base.blue, dir === 'O' ? 0.98 : 0.72);
 
-        const positions = [];
+        /* 去程與回程各走各自的真實路徑，不做任何硬編碼的側移；
+           重合的一段（同一條路）靠「流動箭頭的方向」區分——雙程車道本來就是這樣。 */
+        const lls = [];
         for (const leg of g.legs) {
-          const lp = offsetPath(leg.pts, dir === 'I' ? 26 : 0);
-          for (const p of lp) {
-            const c = Cesium.Cartesian3.fromDegrees(p[0], p[1], 4);
-            const last = positions[positions.length - 1];
-            if (!last || Math.abs(last.x - c.x) > 1e-4 || Math.abs(last.y - c.y) > 1e-4)
-              positions.push(c);
+          for (const p of leg.pts) {
+            const last = lls[lls.length - 1];
+            if (!last || Math.abs(last[0] - p[0]) > 1e-7 || Math.abs(last[1] - p[1]) > 1e-7)
+              lls.push(p);
           }
         }
-        if (positions.length < 2) continue;
+        if (lls.length < 2) continue;
+        const positions = lls.map(p => Cesium.Cartesian3.fromDegrees(p[0], p[1], 5));
+
+        /* 外襯：底下墊一條較寬的暖白線。
+           5 像素的彩線压在攝影模型與衛星圖上會被吃掉，墊白襯才看得出路線。 */
         routePrims.push(scene.primitives.add(new Cesium.Primitive({
           geometryInstances: new Cesium.GeometryInstance({
             geometry: new Cesium.PolylineGeometry({
-              positions: positions,
-              width: dir === 'O' ? 5 : 3,
-              material: Cesium.Material.fromType('Color', {color: color}),
+              positions: lls.map(p => Cesium.Cartesian3.fromDegrees(p[0], p[1], 1.5)),
+              width: dir === 'O' ? 13 : 9,
+              material: Cesium.Material.fromType('Color', {
+                color: Cesium.Color.fromCssColorString('#ffe9b0').withAlpha(0.5)
+              }),
               arcType: Cesium.ArcType.GEODESIC
             })
           }),
@@ -356,22 +362,20 @@
           asynchronous: false
         })));
 
-        /* 每段一個箭頭：方向一眼看得出，回程用淡色 */
-        for (const leg of g.legs) {
-          if (leg.pts.length < 2) continue;
-          const lp = offsetPath(leg.pts, dir === 'I' ? 26 : 0);
-          const mid = lp[Math.floor(lp.length / 2)];
-          const bearing = bearingOf(lp[0], lp[lp.length - 1]);
-          routeArrows.push(arrowBillboards.add({
-            image: arrowImage(route),
-            position: Cesium.Cartesian3.fromDegrees(mid[0], mid[1], 12),
-            color: color,
-            scale: 0.9,
-            rotation: Math.PI / 2 - bearing,
-            heightReference: Cesium.HeightReference.NONE,
-            disableDepthTestDistance: Number.POSITIVE_INFINITY
-          }));
-        }
+        /* 線本身用流動箭頭材質：箭頭沿線往行駛方向跑，方向與「車在走」一眼看得出 */
+        const flowMat = Cesium.Material.fromType('PolylineArrow', {color: color});
+        routePrims.push(scene.primitives.add(new Cesium.Primitive({
+          geometryInstances: new Cesium.GeometryInstance({
+            geometry: new Cesium.PolylineGeometry({
+              positions: positions,
+              width: dir === 'O' ? 6 : 5,
+              material: flowMat,
+              arcType: Cesium.ArcType.GEODESIC
+            })
+          }),
+          appearance: new Cesium.PolylineMaterialAppearance({material: flowMat, translucent: true}),
+          asynchronous: false
+        })));
       }
     }
   }
@@ -430,6 +434,30 @@
 
   /* ── 車輛圖示：canvas 現畫巴士側面剪影 ─────────────── */
   const busImages = {};
+  const beamImages = {};
+  function hexA(hex, a) {
+    const h = hex.replace('#', '');
+    const n = parseInt(h, 16);
+    return 'rgba(' + ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + a + ')';
+  }
+  /* 位置光柱：遠處一眼看得到車在哪一段 */
+  function beamImage(route) {
+    if (beamImages[route]) return beamImages[route];
+    const c = document.createElement('canvas');
+    c.width = 32; c.height = 96;
+    const g = c.getContext('2d');
+    const col = ROUTE_COLOR[route];
+    const grad = g.createLinearGradient(0, 96, 0, 0);
+    grad.addColorStop(0, hexA(col, 0.75));
+    grad.addColorStop(0.4, hexA(col, 0.28));
+    grad.addColorStop(1, hexA(col, 0));
+    g.fillStyle = grad;
+    g.fillRect(11, 0, 10, 96);
+    g.fillStyle = hexA(col, 0.9);
+    g.fillRect(14, 0, 4, 96);
+    beamImages[route] = c;
+    return c;
+  }
   function roundRect(g, x, y, w, h, r) {
     g.beginPath();
     g.moveTo(x + r, y);
@@ -483,8 +511,14 @@
             image: busImage(b.route),
             position: Cesium.Cartesian3.fromDegrees(0, 0, BUS_HEIGHT),
             color: Cesium.Color.WHITE,
-            scale: 0.55,
+            scale: 1.15,
             verticalOrigin: Cesium.VerticalOrigin.CENTER,
+            disableDepthTestDistance: Number.POSITIVE_INFINITY
+          }),
+          beam: busBillboards.add({
+            image: beamImage(b.route),
+            position: Cesium.Cartesian3.fromDegrees(0, 0, 0),
+            verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
             disableDepthTestDistance: Number.POSITIVE_INFINITY
           })
         };
@@ -493,10 +527,12 @@
         st.bus = b;
       }
       st.bb.show = true;
+      st.beam.show = true;
     }
     for (const [id, st] of Array.from(busMarks)) {
       if (alive.has(id)) continue;
       busBillboards.remove(st.bb);
+      busBillboards.remove(st.beam);
       busMarks.delete(id);
     }
   }
@@ -513,6 +549,7 @@
       if (!p) { st.bb.show = false; continue; }
       const ll = toLonLat(p.x, p.z);
       st.bb.position = Cesium.Cartesian3.fromDegrees(ll.lon, ll.lat, BUS_HEIGHT);
+      st.beam.position = Cesium.Cartesian3.fromDegrees(ll.lon, ll.lat, 0);
       /* 貼圖的箭頭指向畫面右方（正東），轉成螢幕座標要減去 π/2：
          北向（方位角 0）在螢幕上是正上方。 */
       st.bb.rotation = Math.PI / 2 - p.head;

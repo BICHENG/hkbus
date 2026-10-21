@@ -17,7 +17,7 @@
   const POLL_MS = 20000;
   const SLOT_TTL = 25 * 60000;      // 槽位记忆时长
   const MATCH_TOL = 8 * 60000;      // 同一班车两次观测的容差
-  const CACHE_KEY = 'citybus.busdata.v2';
+  const CACHE_KEY = 'citybus.busdata.v3';
   const OVERPASS_HOSTS = [
     'https://overpass-api.de/api/interpreter',
     'https://overpass.kumi.systems/api/interpreter'
@@ -27,6 +27,7 @@
   const cache = {
     index: {stops: {}, routes: {}},   // 站名坐标 + 每条线每方向的站序
     slots: {},                        // `${route}|${dir}|${stop}` -> 车辆槽位
+    hist: {},                         // `${route}|${dir}|${stop}` -> 到站时间历史
     seg: {},                          // `${route}|${dir}` -> 逐段耗时样本
     geom: {},                         // `${route}|${dir}` -> 真实道路折线
     meta: {updatedAt: 0, lastOk: true, note: ''}
@@ -41,6 +42,7 @@
       const d = JSON.parse(raw);
       Object.assign(cache.index, d.index || {});
       Object.assign(cache.slots, d.slots || {});
+      Object.assign(cache.hist, d.hist || {});
       Object.assign(cache.seg, d.seg || {});
       Object.assign(cache.geom, d.geom || {});
       cache.meta = Object.assign(cache.meta, d.meta || {});
@@ -52,7 +54,8 @@
     cacheDirty = false;
     try {
       const payload = JSON.stringify({
-        index: cache.index, slots: cache.slots, seg: cache.seg, geom: cache.geom, meta: cache.meta
+        index: cache.index, slots: cache.slots, hist: cache.hist, seg: cache.seg,
+        geom: cache.geom, meta: cache.meta
       });
       localStorage.setItem(CACHE_KEY, payload);
       cacheSize = payload.length;
@@ -204,6 +207,34 @@
     return next;
   }
 
+  /* ── 到站时间历史 ───────────────────────────────────────
+     接口只列「还没到站」的车：一辆车开走上游站，它的到站时间就被接口丢掉了，
+     于是「上游到站时间」配不出「下游到站时间」，任何一段都算不出在途的车。
+     所以每个站留一份最近半小时的到站时间历史，
+     配对时用「上游历史 + 下游当下」，在途车才算得出来。 */
+  const HIST_MS = 30 * 60000;
+  function noteHistory(key, buses, now) {
+    let h = cache.hist[key];
+    if (!h) h = cache.hist[key] = [];
+    const stop = key.split('|')[2];
+    for (const b of buses) {
+      if (b.etaMs < now - HIST_MS) continue;
+      h.push({etaMs: b.etaMs, dest: b.dest, destEn: b.destEn, rmk: b.rmk, rmkEn: b.rmkEn,
+              etaSeq: b.etaSeq, stop: stop});
+    }
+    h.sort((a, b) => a.etaMs - b.etaMs);
+    // 同一班车在多次轮询里会有一串相近的到站时间，保留最接近现在的那个即可
+    const keep = [];
+    for (const e of h) {
+      const last = keep[keep.length - 1];
+      if (last && e.etaMs - last.etaMs < 45000) { keep[keep.length - 1] = e; continue; }
+      keep.push(e);
+    }
+    cache.hist[key] = keep.slice(-60);
+    cacheDirty = true;
+    return cache.hist[key];
+  }
+
   /* 相邻两站之间怎么把班次对上。
      城巴每个站只给 1–2 班车的滑窗 ETA，而且每个站的窗口按各自的时间轴排：
      下游站会先出现上一班车的 ETA，所以「第 1 班车」在两个站往往不是同一班车。
@@ -217,22 +248,26 @@
   const MAX_SEG_MS = 25 * 60000;
   const MIN_SEG_MS = 20000;
 
-  function pairSegment(A, B, expectedMs, straightM) {
+  function pairSegment(A, B, expectedMs, roadDist) {
     const out = [];
     if (!A || !B) return out;
-    const minD = Math.max(MIN_SEG_MS, (straightM || 0) / VMAX * 1000);
-    const used = new Set();
-    for (const a of A) {
-      if (a.stale) continue;                 // 上一轮的陈旧记录不拿来配对
+    const minD = Math.max(MIN_SEG_MS, (roadDist || 0) / VMAX * 1000);
+    const usedA = new Set();
+    /* 逐個下游到站時間往回找上游：
+       A 可以是歷史（車已經開走上游站），B 必須還在未來。 */
+    for (let bi = 0; bi < B.length; bi++) {
+      const b = B[bi];
+      if (b.stale) continue;
       let best = -1, bestCost = Infinity;
-      for (let k = 0; k < B.length; k++) {
-        if (used.has(k) || B[k].stale) continue;
-        const d = B[k].etaMs - a.etaMs;
+      for (let ai = 0; ai < A.length; ai++) {
+        if (usedA.has(ai)) continue;
+        const a = A[ai];
+        const d = b.etaMs - a.etaMs;
         if (d < minD || d > MAX_SEG_MS) continue;
         const cost = expectedMs ? Math.abs(d - expectedMs) : d;
-        if (cost < bestCost) { bestCost = cost; best = k; }
+        if (cost < bestCost) { bestCost = cost; best = ai; }
       }
-      if (best >= 0) { used.add(best); out.push([a, B[best]]); }
+      if (best >= 0) { usedA.add(best); out.push([A[best], B[bi]]); }
     }
     return out;
   }
@@ -281,7 +316,18 @@
   function estimate(route, dir, now) {
     const seq = cache.index.routes[route]?.[dir] || [];
     if (!seq.length) return [];
-    const lists = seq.map(s => cache.slots[`${route}|${dir}|${s.stop}`] || []);
+    /* 上游用「历史 + 当下」：车开走上游站后接口就不给了，只剩历史里有它的到站时间；
+       下游必须用当下的（还没到的）。 */
+    const lists = seq.map(s => {
+      const h = cache.hist[`${route}|${dir}|${s.stop}`] || [];
+      const cur = cache.slots[`${route}|${dir}|${s.stop}`] || [];
+      const seen = new Set();
+      return h.concat(cur).filter(e => {
+        if (seen.has(e.etaMs)) return false;
+        seen.add(e.etaMs);
+        return true;
+      }).sort((a, b) => a.etaMs - b.etaMs);
+    });
     /* 物理下限用「公路距離」而不是直線距離：
        高速段（紅橋→深圳灣口岸）直線只有 11.5 公里、公路 17.6 公里，
        用直線會把 9 分半的假配對放過去（112 km/h，物理上不可能）。 */
@@ -300,7 +346,7 @@
       const ai = idx.get(a.stop), bi = idx.get(b.stop);
       if (ai != null && bi === ai + 1) noteSegment(route, dir, ai, dur);
       out.push({
-        id: `${route}|${dir}|${a.etaSeq || a.etaMs}|${ai}`,
+        id: `${route}|${dir}|${a.etaMs}>${b.etaMs}`,
         route, dir,
         fromStop: a.stop, toStop: b.stop,
         fromEtaMs: a.etaMs, toEtaMs: b.etaMs,
@@ -680,6 +726,7 @@
     for (const [key, list] of byKey) {
       list.sort((a, b) => a.etaMs - b.etaMs);
       mergeSlots(key, list, now);
+      noteHistory(key, list, now);
     }
     cache.meta.updatedAt = now;
     cache.meta.lastOk = fail === 0;
